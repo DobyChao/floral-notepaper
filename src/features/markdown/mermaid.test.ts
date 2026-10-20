@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, test, vi } from "vitest";
 import mermaid from "mermaid";
+import elkLayouts from "@mermaid-js/layout-elk";
 import { renderMermaid } from "./mermaid";
 
 vi.mock("mermaid", () => ({
-  default: { initialize: vi.fn(), render: vi.fn() },
+  default: { initialize: vi.fn(), render: vi.fn(), registerLayoutLoaders: vi.fn() },
 }));
+vi.mock("@mermaid-js/layout-elk", () => ({ default: [{ name: "elk", loader: vi.fn() }] }));
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -21,6 +23,7 @@ test("serializes configuration and rendering, uses unique IDs, and removes tempo
       startOnLoad: false,
       securityLevel: "strict",
       suppressErrorRendering: true,
+      layout: "elk",
     });
     expect(config?.secure).toContain("securityLevel");
     await Promise.resolve();
@@ -34,6 +37,10 @@ test("serializes configuration and rendering, uses unique IDs, and removes tempo
     renderMermaid("graph TD; C-->D", true),
   ]);
   expect(new Set(ids).size).toBe(2);
+  expect(mermaid.registerLayoutLoaders).toHaveBeenCalledExactlyOnceWith(elkLayouts);
+  expect(vi.mocked(mermaid.registerLayoutLoaders).mock.invocationCallOrder[0]).toBeLessThan(
+    vi.mocked(mermaid.initialize).mock.invocationCallOrder[0],
+  );
   expect(themes).toEqual(["default", "dark"]);
   expect(document.body.childElementCount).toBe(before);
 });
