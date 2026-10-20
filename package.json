@@ -15,7 +15,6 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@mermaid-js/layout-elk": "^0.2.3",
     "@tauri-apps/api": "~2.11.0",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.7.0",
@@ -24,7 +23,7 @@
     "i18next": "^26.2.0",
     "indent-textarea": "^4.0.0",
     "katex": "^0.16.47",
-    "mermaid": "^11.17.2",
+    "mermaid": "^12.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-i18next": "^17.0.8",
@@ -58,5 +57,8 @@
   "lint-staged": {
     "*.{ts,tsx,js,jsx,css,json,yml,yaml,html,md}": "oxfmt --no-error-on-unmatched-pattern",
     "src-tauri/**/*.rs": "cargo fmt --manifest-path src-tauri/Cargo.toml --"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

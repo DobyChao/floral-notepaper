@@ -1,22 +1,20 @@
 // Initialize and render together: Mermaid's configuration is shared between diagrams.
 let renderQueue: Promise<unknown> = Promise.resolve();
 let nextId = 0;
-let elkRegistered = false;
 
 export function renderMermaid(source: string, dark: boolean): Promise<string> {
   const render = renderQueue.then(async () => {
     const { default: mermaid } = await import("mermaid");
-    if (!elkRegistered) {
-      const { default: elkLayouts } = await import("@mermaid-js/layout-elk");
-      mermaid.registerLayoutLoaders(elkLayouts);
-      elkRegistered = true;
-    }
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: "strict",
       suppressErrorRendering: true,
       theme: dark ? "dark" : "default",
+      look: "classic",
       layout: "elk",
+      elk: {
+        lineHops: true,
+      },
       flowchart: { htmlLabels: false },
       secure: [
         "secure",
