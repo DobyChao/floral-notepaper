@@ -36,6 +36,8 @@
 
 - **Markdown 编辑与预览** — 支持 GitHub Flavored Markdown 语法，实时切换编辑和预览模式
 
+  支持在 `mermaid` 代码块中绘制流程图、时序图等图表，详见 [Mermaid 使用示例](Docs/Mermaid.md)。
+
   ![主窗口截图](Docs/images/主窗口截图.png)
 
 - **快捷便签** — 通过托盘或全局快捷键（默认 `Ctrl+Space`）随时唤出便签窗口

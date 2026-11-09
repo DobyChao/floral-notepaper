@@ -15,6 +15,7 @@ import "katex/dist/katex.min.css";
 import remarkAlerts from "./remarkAlerts";
 import rehypeTaskLists from "./rehypeTaskLists";
 import { resolveMarkdownImageSrc } from "./imageSrc";
+import { MermaidBlock } from "./MermaidBlock";
 
 function CodeBlock({ children, language }: { children: React.ReactNode; language?: string }) {
   const { t } = useTranslation();
@@ -30,13 +31,17 @@ function CodeBlock({ children, language }: { children: React.ReactNode; language
 
   return (
     <div className="markdown-code-block my-3 relative group">
-      <pre
-        className={`markdown-code-scroll m-0 px-4 rounded bg-paper-warm/80 overflow-x-auto ${
-          language ? "pt-8 pb-3" : "py-3"
-        }`}
-      >
-        {children}
-      </pre>
+      {language?.toLowerCase() === "mermaid" ? (
+        <MermaidBlock source={extractText(children)}>{children}</MermaidBlock>
+      ) : (
+        <pre
+          className={`markdown-code-scroll m-0 px-4 rounded bg-paper-warm/80 overflow-x-auto ${
+            language ? "pt-8 pb-3" : "py-3"
+          }`}
+        >
+          {children}
+        </pre>
+      )}
       {language && (
         <span className="absolute top-2 left-3 text-[10px] font-mono text-ink-faint/70 uppercase tracking-wider select-none">
           {language}
