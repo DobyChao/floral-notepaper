@@ -70,6 +70,8 @@ pub struct AppConfig {
     pub remember_surface_size: bool,
     #[serde(default = "default_tile_ctrl_close")]
     pub tile_ctrl_close: bool,
+    #[serde(default = "default_notepad_esc_close")]
+    pub notepad_esc_close: bool,
     #[serde(default)]
     pub tile_double_click_to_edit: bool,
     #[serde(default)]
@@ -1154,6 +1156,7 @@ impl NoteStore {
             background_position_y: default_background_position(),
             remember_surface_size: default_remember_surface_size(),
             tile_ctrl_close: default_tile_ctrl_close(),
+            notepad_esc_close: default_notepad_esc_close(),
             tile_double_click_to_edit: false,
             tile_save_returns_to_pin: false,
             tile_render_markdown: false,
@@ -1736,6 +1739,10 @@ fn default_tile_ctrl_close() -> bool {
     true
 }
 
+fn default_notepad_esc_close() -> bool {
+    true
+}
+
 fn default_split_scroll_sync() -> bool {
     true
 }
@@ -1880,6 +1887,7 @@ mod tests {
         assert_eq!(default_config.global_shortcut, "Ctrl+Space");
         assert!(default_config.note_auto_save);
         assert!(default_config.note_surface_auto_save);
+        assert!(default_config.notepad_esc_close);
         assert_eq!(default_config.tile_color, "#f6f3ec");
         assert_eq!(default_config.tile_color_mode, "system");
         assert!(!default_config.tile_double_click_to_edit);
@@ -1916,6 +1924,7 @@ mod tests {
             background_position_y: 50.0,
             remember_surface_size: true,
             tile_ctrl_close: true,
+            notepad_esc_close: true,
             tile_double_click_to_edit: true,
             tile_save_returns_to_pin: true,
             tile_render_markdown: false,
@@ -1934,6 +1943,38 @@ mod tests {
         let loaded = store.load_config().expect("reload config");
         saved.data_dir = Some(store.data_dir().to_string_lossy().to_string());
         assert_eq!(loaded, saved);
+    }
+
+    #[test]
+    fn keeps_notepad_esc_close_default_when_config_lacks_field() {
+        let store = test_store("esc-close-default");
+        fs::create_dir_all(store.config_dir.as_path()).expect("create config dir");
+
+        // 旧版本 config.json 没有 notepadEscClose 字段，读入时应回落到默认开启
+        let legacy = serde_json::json!({
+            "globalShortcut": "Ctrl+Space",
+            "closeToTray": true,
+            "autostart": false,
+            "defaultViewMode": "split"
+        });
+        fs::write(
+            store.config_path(),
+            serde_json::to_string_pretty(&legacy).expect("serialize legacy config"),
+        )
+        .expect("write legacy config");
+
+        let loaded = store.load_config().expect("load legacy config");
+        assert!(loaded.notepad_esc_close);
+
+        // 回写后的 config 补上该字段，再次读入保持不变
+        store
+            .save_config(AppConfig {
+                notepad_esc_close: false,
+                ..loaded
+            })
+            .expect("save config with esc close off");
+        let reloaded = store.load_config().expect("reload config");
+        assert!(!reloaded.notepad_esc_close);
     }
 
     #[test]
