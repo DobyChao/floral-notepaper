@@ -39,6 +39,7 @@ import {
   shouldReturnToTileAfterManualSave,
   shouldSaveBeforeSwitchingToTile,
 } from "../features/windows/noteSurfaceSavePolicy";
+import { shouldCloseOnEsc } from "../features/windows/notepadEscClose";
 import {
   NOTE_SURFACE_ACTION_EVENT,
   surfaceActionFromEvent,
@@ -143,6 +144,7 @@ export function NotePad({
   const [tileRenderMarkdown, setTileRenderMarkdown] = useState(false);
   const [tileDoubleClickToEdit, setTileDoubleClickToEdit] = useState(false);
   const [tileSaveReturnsToPin, setTileSaveReturnsToPin] = useState(false);
+  const [notepadEscClose, setNotepadEscClose] = useState(true);
   const [tileColor, setTileColor] = useState(() =>
     resolveTileColor("system", normalizeTileColor(initialTileColor)),
   );
@@ -219,6 +221,7 @@ export function NotePad({
           setTileRenderMarkdown(loadedConfig.tileRenderMarkdown ?? false);
           setTileDoubleClickToEdit(loadedConfig.tileDoubleClickToEdit ?? false);
           setTileSaveReturnsToPin(loadedConfig.tileSaveReturnsToPin ?? false);
+          setNotepadEscClose(loadedConfig.notepadEscClose ?? true);
           setTileColorRaw(normalizeTileColor(loadedConfig.tileColor));
           setTileColorMode(loadedConfig.tileColorMode ?? "system");
           setTileColor(
@@ -275,6 +278,7 @@ export function NotePad({
       tileRenderMarkdown?: boolean;
       tileDoubleClickToEdit?: boolean;
       tileSaveReturnsToPin?: boolean;
+      notepadEscClose?: boolean;
       noteSurfaceAutoSave?: boolean;
     }>("config-changed", (event) => {
       const mode = event.payload.tileColorMode ?? tileColorModeRef.current;
@@ -289,6 +293,7 @@ export function NotePad({
         setTileDoubleClickToEdit(event.payload.tileDoubleClickToEdit);
       if (event.payload.tileSaveReturnsToPin != null)
         setTileSaveReturnsToPin(event.payload.tileSaveReturnsToPin);
+      if (event.payload.notepadEscClose != null) setNotepadEscClose(event.payload.notepadEscClose);
       if (event.payload.noteSurfaceAutoSave != null)
         setNoteSurfaceAutoSave(event.payload.noteSurfaceAutoSave);
     });
@@ -644,6 +649,28 @@ export function NotePad({
         showToast(getErrorMessage(error));
       });
   }, [surfaceMode]);
+
+  // Esc 关闭便签小窗：只关快捷唤起的 pad 态；磁贴态和磁贴进入编辑撑起的
+  // pad 态（restingSurfaceBoundsRef 非空）不响应，避免误关编辑中的窗口
+  useEffect(() => {
+    if (!notepadEscClose) return;
+    function handleEscKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (
+        !shouldCloseOnEsc({
+          enabled: notepadEscClose,
+          surfaceMode,
+          editExpanded: restingSurfaceBoundsRef.current != null,
+        })
+      ) {
+        return;
+      }
+      event.preventDefault();
+      handleClose();
+    }
+    document.addEventListener("keydown", handleEscKey);
+    return () => document.removeEventListener("keydown", handleEscKey);
+  }, [handleClose, surfaceMode, notepadEscClose]);
 
   const copyTileContent = useCallback(async () => {
     try {
