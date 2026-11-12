@@ -13,8 +13,10 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { exportMarkdownNote, importMarkdownNote } from "../features/importExport/api";
 import { MarkdownPreviewLazy as MarkdownPreview } from "../features/markdown/MarkdownPreviewLazy";
+import { LiveEditor } from "../features/markdown/LiveEditor";
 import { showToast } from "./Toast";
 import {
   createScrollSyncMap,
@@ -33,6 +35,7 @@ import {
   parentDirectory,
   type FileLinkTarget,
 } from "../features/markdown/linkTarget";
+import { resolveMarkdownImageSrc } from "../features/markdown/imageSrc";
 import {
   chooseDataDirectory,
   getConfig,
@@ -432,6 +435,11 @@ export function MainWindow({
   const externalFileMtimeRef = useRef<number>(0);
   const lastExternalSaveRef = useRef<number>(0);
   const imageBaseDir = useImageBaseDir();
+  // 即时模式图片解析：与预览共用 resolveMarkdownImageSrc，保证两个视图渲染同一 URL
+  const resolveLiveImageSrc = useCallback(
+    (src: string) => resolveMarkdownImageSrc(src, imageBaseDir ?? undefined, convertFileSrc),
+    [imageBaseDir],
+  );
   const saveStateRef = useRef(saveState);
   const isMacOS = useMemo(() => {
     return (
@@ -564,6 +572,10 @@ export function MainWindow({
       {
         value: "split" as ViewMode,
         label: t("settings.defaultView.split", { defaultValue: "分栏" }),
+      },
+      {
+        value: "live" as ViewMode,
+        label: t("settings.defaultView.live", { defaultValue: "即时" }),
       },
       {
         value: "preview" as ViewMode,
@@ -1155,12 +1167,17 @@ export function MainWindow({
       settleSaveState("saving");
       try {
         if (externalFile) {
-          await saveExternalFile(externalFile.filePath, contentSnapshot);
+          // 必须在写盘“之前”就打上时间戳：saveExternalFile 一旦落盘，磁盘 mtime 立刻变化，
+          // 而 mtime 轮询（外部改动检测）是独立的宏任务——若它在“已落盘但下面这行尚未执行”的
+          // 窗口里读到新 mtime，会把我们自己的写入误判成外部改动 → 回读整篇 → 即时模式光标被
+          // 重置（“切换外部文件后拖拽复制时光标乱跳”的根因）。写盘耗时后再刷新一次覆盖全程。
           lastExternalSaveRef.current = Date.now();
+          await saveExternalFile(externalFile.filePath, contentSnapshot);
           const mtime = await getFileModifiedTime(externalFile.filePath);
           if (stillCurrent()) {
             externalFileMtimeRef.current = mtime;
           }
+          lastExternalSaveRef.current = Date.now();
           settleSaveState(contentValueRef.current === contentSnapshot ? "saved" : "dirty");
         } else {
           const category = notesRef.current.find((note) => note.id === id)?.category ?? "";
@@ -3157,10 +3174,33 @@ export function MainWindow({
                           }
                           fontSize={settingsConfig?.fontSize ?? 14}
                           renderHtml={settingsConfig?.renderHtmlMarkdown ?? false}
+                          codeWrap={settingsConfig?.codeWrap ?? true}
                           imageBaseDir={imageBaseDir ?? undefined}
                           onOpenFileLink={handleOpenFileLink}
                         />
                       </div>
+                    </div>
+                  )}
+
+                  {viewMode === "live" && (
+                    <div className="flex flex-col min-h-0 min-w-0 flex-1 px-6 pt-3 pb-2">
+                      <LiveEditor
+                        value={content}
+                        docKey={selectedId ?? undefined}
+                        onChange={(next) => {
+                          setContent(next);
+                          markDirty();
+                        }}
+                        fontSize={settingsConfig?.fontSize ?? 14}
+                        resolveImageSrc={resolveLiveImageSrc}
+                        showCodeLineNumbers={settingsConfig?.codeBlockLineNumbers ?? false}
+                        showEditorLineNumbers={settingsConfig?.editorLineNumbers ?? false}
+                        activeHighlight={settingsConfig?.liveActiveHighlight ?? "off"}
+                        codeWrap={settingsConfig?.codeWrap ?? true}
+                        placeholder={t("main.editor.contentPlaceholder", {
+                          defaultValue: "开始写作……",
+                        })}
+                      />
                     </div>
                   )}
                 </>

@@ -60,9 +60,12 @@
     "unsupportedShortcutGeneric": "Shortcut configuration is invalid"
   },
   "markdown": {
+    "codeCollapsed": "… collapsed, click to expand",
+    "collapse": "Collapse",
     "copied": "Copied",
     "copy": "Copy",
     "emptyHint": "Preview of the current note",
+    "expand": "Expand",
     "alert": {
       "note": "Note",
       "tip": "Tip",
@@ -208,6 +211,13 @@
     }
   },
   "settings": {
+    "activeHighlight": {
+      "block": "Block",
+      "blockLine": "Block+Line",
+      "label": "Highlight active line/block (Live)",
+      "line": "Line",
+      "off": "Off"
+    },
     "autoSave": {
       "externalFile": "Auto-save external files",
       "note": "Auto-save notes",
@@ -216,12 +226,16 @@
     "autostart": "Launch on Startup",
     "closeTitle": "Close Settings",
     "closeToTray": "Close to Tray",
+    "codeBlockLineNumbers": "Code block line numbers (Live)",
+    "codeWrap": "Code block wrapping",
     "defaultView": {
       "edit": "Edit",
       "label": "Default view",
+      "live": "Live",
       "preview": "Preview",
       "split": "Split"
     },
+    "editorLineNumbers": "Editor line-number gutter (Live)",
     "fontSize": {
       "editor": "Editor font size",
       "surface": "Surface font size"
