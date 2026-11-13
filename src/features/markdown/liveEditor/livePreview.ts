@@ -1,7 +1,14 @@
-import { StateField, type EditorState, type Extension, type Range } from "@codemirror/state";
+import {
+  StateField,
+  type EditorState,
+  type Extension,
+  type Range,
+  type Text,
+} from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import { foldEffect, foldedRanges, syntaxTree, unfoldEffect } from "@codemirror/language";
 import type { SyntaxNode } from "@lezer/common";
+import { BOUNDARY_CHAR, HIGHLIGHT_PATTERN, INLINE_CHAR } from "../rehypeHighlight";
 import {
   BulletWidget,
   CheckboxWidget,
@@ -53,6 +60,7 @@ const fenceMark = Decoration.mark({ class: "cm-md-fence-mark" });
 const bulletRaw = Decoration.mark({ class: "cm-md-bullet-raw" });
 const quoteLine = Decoration.line({ class: "cm-md-quote" });
 const tableSourceLine = Decoration.line({ class: "cm-md-table-source" });
+const highlight = Decoration.mark({ class: "cm-md-highlight" });
 const headingLine = [
   null,
   Decoration.line({ class: "cm-md-h1" }),
@@ -72,6 +80,106 @@ function directChildren(node: SyntaxNode): Array<{ name: string; from: number; t
     } while (cursor.nextSibling());
   }
   return out;
+}
+
+// ── ==text== 高亮（与预览的 rehypeHighlight 同一套配对规则） ──
+// lezer 的 markdown 语法没有这个方言节点，改为按“容器”（段落/标题/行内
+// 格式）扫描：结构化子节点里的行内格式节点（可整体落进高亮里）占一个内联
+// 占位符，其余节点（行内代码、图片、URL 等）占边界符，子节点之间的缺口
+// 直接取原文。两个 == 都完整落在同一段纯文本里才配对；内容首尾不能是空白
+// 或 =。光标所在行还原原始语法，行为与标题/强调等行内标记一致。
+const HIGHLIGHT_INLINE_NODES = new Set(["Emphasis", "StrongEmphasis", "Strikethrough", "Link"]);
+const HIGHLIGHT_CONTAINERS = new Set([
+  "Paragraph",
+  "ATXHeading1",
+  "ATXHeading2",
+  "ATXHeading3",
+  "ATXHeading4",
+  "ATXHeading5",
+  "ATXHeading6",
+  "SetextHeading1",
+  "SetextHeading2",
+  ...HIGHLIGHT_INLINE_NODES,
+]);
+
+interface HighlightPair {
+  openFrom: number;
+  openTo: number;
+  closeFrom: number;
+  closeTo: number;
+}
+
+// 数学公式段（$…$ / $$…$$）lezer 同样不识别，若不处理，公式里的 == 会被
+// 误配成高亮（预览里 remark-math 先行、不会）。这里按与 remark-math 对齐的
+// 近似规则把公式段整体改写为边界符：行内公式内容不含 $、不跨行、首尾非空白；
+// $$…$$ 块公式可跨行。转义过的 \$ 在语法树里是独立的 Escape 节点（边界符），
+// 不会进入公式配对。
+function maskMathSpans(chars: string[], posAt: Array<number | null>): void {
+  const apply = (pattern: RegExp, allow: (content: string) => boolean) => {
+    const text = chars.join("");
+    for (const match of text.matchAll(pattern)) {
+      if (!allow(match[1])) continue;
+      const start = match.index ?? 0;
+      const end = start + match[0].length;
+      for (let i = start; i < end; i++) {
+        chars[i] = BOUNDARY_CHAR;
+        posAt[i] = null;
+      }
+    }
+  };
+  apply(/\$\$([^$\uE000]+?)\$\$/g, () => true);
+  apply(/\$([^$\uE000\n]+)\$/g, (content) => content.length > 0 && !/^\s|\s$/.test(content));
+}
+
+// 在一个容器节点的行内内容里寻找所有可配对的 == 标记，返回文档区间。
+// lezer 树不会为纯文本生成 Text 子节点（纯文本段落甚至是叶子），所以这里
+// 用「结构化子节点占位 + 子节点之间的缺口取原文」重建虚拟文本——等价于
+// hast 树里的文本节点序列。
+function findHighlightPairs(node: SyntaxNode, doc: Text): HighlightPair[] {
+  const chars: string[] = [];
+  const posAt: Array<number | null> = [];
+
+  const pushText = (from: number, to: number) => {
+    if (to <= from) return;
+    const value = doc.sliceString(from, to);
+    for (let index = 0; index < value.length; index += 1) {
+      chars.push(value[index]);
+      posAt.push(from + index);
+    }
+  };
+
+  let cursor = node.from;
+  for (const child of directChildren(node)) {
+    pushText(cursor, child.from);
+    chars.push(HIGHLIGHT_INLINE_NODES.has(child.name) ? INLINE_CHAR : BOUNDARY_CHAR);
+    posAt.push(null);
+    cursor = child.to;
+  }
+  pushText(cursor, node.to);
+  maskMathSpans(chars, posAt);
+
+  const pairs: HighlightPair[] = [];
+  const pattern = new RegExp(HIGHLIGHT_PATTERN.source, "g");
+  const text = chars.join("");
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    const openStart = match.index;
+    const closeStart = openStart + match[0].length - 2;
+    const openPos = posAt[openStart];
+    const openNext = posAt[openStart + 1];
+    const closePos = posAt[closeStart];
+    const closeNext = posAt[closeStart + 1];
+    // 两个 == 都必须完整落在同一段纯文本里（相邻的真实文档位置）
+    if (openPos === null || openNext !== openPos + 1) continue;
+    if (closePos === null || closeNext !== closePos + 1) continue;
+    pairs.push({
+      openFrom: openPos,
+      openTo: openPos + 2,
+      closeFrom: closePos,
+      closeTo: closePos + 2,
+    });
+  }
+  return pairs;
 }
 
 function buildDecorations(state: EditorState, options: LivePreviewOptions): DecorationSet {
@@ -121,6 +229,17 @@ function buildDecorations(state: EditorState, options: LivePreviewOptions): Deco
     syntaxTree(state).iterate({
       enter: (nodeRef) => {
         const { name, from, to } = nodeRef;
+
+        if (HIGHLIGHT_CONTAINERS.has(name)) {
+          for (const pair of findHighlightPairs(nodeRef.node, doc)) {
+            // 光标落在高亮跨到的行上时还原原始语法（与标题/强调一致）
+            if (!isActive(pair.openFrom, pair.closeTo)) {
+              decorations.push(highlight.range(pair.openTo, pair.closeFrom));
+              decorations.push(hideMark.range(pair.openFrom, pair.openTo));
+              decorations.push(hideMark.range(pair.closeFrom, pair.closeTo));
+            }
+          }
+        }
 
         const headingMatch = /^ATXHeading(\d)$/.exec(name);
         if (headingMatch) {
