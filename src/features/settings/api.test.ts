@@ -53,6 +53,10 @@ describe("settings api", () => {
       tileRenderMarkdown: false,
       renderHtmlMarkdown: false,
       splitScrollSync: true,
+      codeBlockLineNumbers: false,
+      editorLineNumbers: false,
+      liveActiveHighlight: "off",
+      codeWrap: true,
       openAtCursor: true,
     };
     mockedInvoke.mockResolvedValue(config);
@@ -88,6 +92,10 @@ describe("settings api", () => {
       tileRenderMarkdown: false,
       renderHtmlMarkdown: false,
       splitScrollSync: true,
+      codeBlockLineNumbers: false,
+      editorLineNumbers: false,
+      liveActiveHighlight: "off",
+      codeWrap: true,
       openAtCursor: true,
     };
     mockedInvoke.mockResolvedValue(config);
@@ -116,6 +124,7 @@ describe("settings api", () => {
     expect(normalizeViewMode("edit")).toBe("edit");
     expect(normalizeViewMode("split")).toBe("split");
     expect(normalizeViewMode("preview")).toBe("preview");
+    expect(normalizeViewMode("live")).toBe("live");
     expect(normalizeViewMode("unknown")).toBe("split");
   });
 

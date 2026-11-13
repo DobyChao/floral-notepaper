@@ -30,6 +30,27 @@ describe("MarkdownPreview", () => {
     expect(buttonIndex).toBeGreaterThan(preCloseIndex);
   });
 
+  test("renders the unified code toolbar with wrap on by default", () => {
+    const markup = renderToStaticMarkup(<MarkdownPreview content={"```js\nconst a = 1;\n```"} />);
+
+    // 与即时模式同款工具栏（语言 · 复制 · 折叠）
+    expect(markup).toContain("cm-md-code-toolbar");
+    expect(markup).toContain("cm-md-code-lang");
+    expect(markup).toContain("js");
+    // 默认开启自动换行
+    expect(markup).toContain("whitespace-pre-wrap");
+    expect(markup).not.toContain("overflow-x-auto");
+  });
+
+  test("makes code blocks scroll horizontally when codeWrap is off", () => {
+    const markup = renderToStaticMarkup(
+      <MarkdownPreview content={"```js\nconst a = 1;\n```"} codeWrap={false} />,
+    );
+
+    expect(markup).toContain("overflow-x-auto");
+    expect(markup).not.toContain("whitespace-pre-wrap");
+  });
+
   test.each([false, true])("recognizes Mermaid fences with renderHtml=%s", (renderHtml) => {
     const markup = renderToStaticMarkup(
       <MarkdownPreview content={"```mermaid\ngraph TD\nA --> B\n```"} renderHtml={renderHtml} />,
