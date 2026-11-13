@@ -13,6 +13,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Components, ExtraProps } from "react-markdown";
 import "katex/dist/katex.min.css";
 import remarkAlerts from "./remarkAlerts";
+import rehypeHighlight from "./rehypeHighlight";
 import rehypeTaskLists from "./rehypeTaskLists";
 import { resolveMarkdownImageSrc } from "./imageSrc";
 import { MermaidBlock } from "./MermaidBlock";
@@ -215,10 +216,11 @@ const sanitizeSchema = {
     href: [...(defaultSchema.protocols?.href ?? []), "file"],
   },
 };
-const rehypePluginsDefault = [rehypeKatex, rehypeSlug, rehypeTaskLists];
+const rehypePluginsDefault = [rehypeHighlight, rehypeKatex, rehypeSlug, rehypeTaskLists];
 const rehypePluginsWithHtml = [
   rehypeRaw,
   [rehypeSanitize, sanitizeSchema],
+  rehypeHighlight,
   rehypeKatex,
   rehypeSlug,
   rehypeTaskLists,

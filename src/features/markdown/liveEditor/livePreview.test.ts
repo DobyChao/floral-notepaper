@@ -64,6 +64,10 @@ function widgetNames(deco: DecorationSet): string[] {
   return allDecos(deco).flatMap((d) => (d.spec.widget ? [d.spec.widget.constructor.name] : []));
 }
 
+function hasMarkClass(deco: DecorationSet, cls: string, from: number, to: number): boolean {
+  return allDecos(deco).some((d) => d.spec.class === cls && d.from === from && d.to === to);
+}
+
 describe("livePreview decorations", () => {
   test("styles heading lines and hides the leading marks when the cursor is elsewhere", () => {
     // 光标停在末尾“正文段落”行
@@ -151,5 +155,95 @@ describe("livePreview decorations", () => {
 
     expect(classNames(deco)).toContain("cm-md-quote");
     view.destroy();
+  });
+
+  // ── ==text== 高亮 ──
+  test("highlights ==text== and hides the markers when the cursor is elsewhere", () => {
+    // 光标停在末行
+    const doc = "==重点==\n\n正文";
+    const { view, deco } = viewFor(doc, { resolveImageSrc: (s) => s });
+
+    // 内容区间 [2,4) 有高亮，两段 == 记号（0..2 / 4..6）被隐藏
+    expect(hasMarkClass(deco, "cm-md-highlight", 2, 4)).toBe(true);
+    expect(hasReplaceCovering(deco, 0, 2)).toBe(true);
+    expect(hasReplaceCovering(deco, 4, 6)).toBe(true);
+    view.destroy();
+  });
+
+  test("reveals the raw ==markers== on the cursor's own line", () => {
+    const doc = "==重点==\n\n正文";
+    // 光标放进高亮所在行
+    const { view, deco } = viewFor(doc, { resolveImageSrc: (s) => s }, 3);
+
+    expect(classNames(deco)).not.toContain("cm-md-highlight");
+    expect(hasReplaceCovering(deco, 0, 2)).toBe(false);
+    view.destroy();
+  });
+
+  test("keeps comparison and empty markers unstyled", () => {
+    const doc = "a == b\n\n====";
+    const { view, deco } = viewFor(doc, { resolveImageSrc: (s) => s });
+
+    expect(classNames(deco)).not.toContain("cm-md-highlight");
+    view.destroy();
+  });
+
+  test("highlights a span across wrapped lines and reveals it when the cursor joins", () => {
+    // 同一段落内的两行被一对 == 包住；光标先在末段
+    const doc = "==第一行\n第二行==\n\n后文";
+    const away = viewFor(doc, { resolveImageSrc: (s) => s });
+    expect(classNames(away.deco)).toContain("cm-md-highlight");
+    away.view.destroy();
+
+    // 光标进入高亮跨到的行：还原原始语法
+    const inside = viewFor(doc, { resolveImageSrc: (s) => s }, 2);
+    expect(classNames(inside.deco)).not.toContain("cm-md-highlight");
+    inside.view.destroy();
+  });
+
+  test.each([
+    ["行内代码", "行内代码 `==x==`"],
+    ["代码块", "```text\n==x==\n```"],
+    ["行内公式", "$==x==$ 后文"],
+    ["块公式", "$$\n==x==\n$$"],
+  ])("keeps == inside %s literal", (_name, docText) => {
+    const { view, deco } = viewFor(docText, { resolveImageSrc: (s) => s });
+
+    expect(classNames(deco)).not.toContain("cm-md-highlight");
+    view.destroy();
+  });
+
+  test("keeps a lone $ from suppressing a later highlight", () => {
+    const doc = "价格 $5 与 ==重点==\n\n后文";
+    const { view, deco } = viewFor(doc, { resolveImageSrc: (s) => s });
+
+    expect(classNames(deco)).toContain("cm-md-highlight");
+    view.destroy();
+  });
+
+  test("keeps bold inside a highlight and vice versa", () => {
+    const outer = viewFor("==a **b** c==\n\n后文", { resolveImageSrc: (s) => s });
+    const outerClasses = classNames(outer.deco);
+    expect(outerClasses).toContain("cm-md-highlight");
+    expect(outerClasses).toContain("cm-md-strong");
+    outer.view.destroy();
+
+    const inner = viewFor("**==b==**\n\n后文", { resolveImageSrc: (s) => s });
+    const innerClasses = classNames(inner.deco);
+    expect(innerClasses).toContain("cm-md-highlight");
+    expect(innerClasses).toContain("cm-md-strong");
+    inner.view.destroy();
+  });
+
+  test("highlights inside headings and links", () => {
+    const heading = viewFor("# ==标题==\n\n后文", { resolveImageSrc: (s) => s });
+    const headingClasses = classNames(heading.deco);
+    expect(headingClasses).toContain("cm-md-h1");
+    expect(headingClasses).toContain("cm-md-highlight");
+    heading.view.destroy();
+
+    const link = viewFor("[==链接==](https://example.com)\n\n后文", { resolveImageSrc: (s) => s });
+    expect(classNames(link.deco)).toContain("cm-md-highlight");
+    link.view.destroy();
   });
 });
