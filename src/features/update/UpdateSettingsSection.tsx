@@ -947,21 +947,24 @@ interface UpdateToggleRowProps {
 }
 
 function UpdateToggleRow({ label, checked, disabled = false, onChange }: UpdateToggleRowProps) {
+  // The row itself is a switch button: the previous sr-only checkbox was a
+  // focus target with no visible focus indication.
   return (
-    <label
-      className={`flex items-center justify-between h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25 ${
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => {
+        if (!disabled) onChange(!checked);
+      }}
+      className={`w-full text-left flex items-center justify-between h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25 ${
         disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
       }`}
     >
       <span className="text-[12px] text-ink-soft">{label}</span>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-        className="sr-only"
-      />
       <div
+        aria-hidden="true"
         className={`relative w-8 h-[18px] rounded-full transition-colors duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] ${
           checked ? "bg-bamboo" : "bg-paper-deep/50"
         }`}
@@ -972,7 +975,7 @@ function UpdateToggleRow({ label, checked, disabled = false, onChange }: UpdateT
           }`}
         />
       </div>
-    </label>
+    </button>
   );
 }
 
