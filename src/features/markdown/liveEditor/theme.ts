@@ -102,6 +102,14 @@ export function liveEditorTheme(fontSize: number) {
       textDecoration: "line-through",
       color: "var(--color-ink-faint)",
     },
+    // ==text== 高亮：与预览的 .markdown-highlight 同一底色。不加内边距——
+    // 光标所在行会还原原始语法并撤掉整个高亮，内边距会带来水平位移。
+    ".cm-md-highlight": {
+      backgroundColor: "var(--color-bamboo-glow)",
+      borderRadius: "3px",
+      boxDecorationBreak: "clone",
+      WebkitBoxDecorationBreak: "clone",
+    },
     ".cm-md-inline-code": {
       fontFamily: "var(--font-mono)",
       fontSize: "0.88em",

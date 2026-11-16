@@ -113,6 +113,7 @@
       "boldText": "Bold text",
       "codeText": "Code",
       "headingText": "Heading",
+      "highlightText": "Highlighted text",
       "italicText": "Italic text",
       "listItem": "List item",
       "quoteText": "Blockquote"
@@ -150,6 +151,7 @@
       "bold": "Bold",
       "code": "Code",
       "heading": "Heading",
+      "highlight": "Highlight",
       "hr": "Horizontal rule",
       "inlineMath": "Inline math",
       "italic": "Italic",

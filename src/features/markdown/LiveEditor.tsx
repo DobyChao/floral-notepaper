@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
 import { Annotation, Compartment, EditorState, type TransactionSpec } from "@codemirror/state";
 import {
   EditorView,
@@ -45,6 +45,20 @@ export interface LiveEditorProps {
    * an in-place *reload* of the same doc (docKey unchanged → preserve the cursor).
    */
   docKey?: string | number;
+  /**
+   * Handle exposing the inner EditorView (null before mount / after unmount) so
+   * hosts (e.g. the toolbar) can dispatch commands into the live editor.
+   * React 19 passes `ref` as a regular prop.
+   */
+  ref?: Ref<LiveEditorHandle>;
+}
+
+/**
+ * Imperative handle for hosts: `ref.current.view` is the live EditorView while
+ * mounted (getter stays live across re-renders), or null.
+ */
+export interface LiveEditorHandle {
+  view: EditorView | null;
 }
 
 const identity = (src: string) => src;
@@ -67,9 +81,21 @@ export function LiveEditor({
   activeHighlight = "off",
   codeWrap = true,
   docKey,
+  ref,
 }: LiveEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+
+  // 用 getter 保持句柄常新：宿主拿到的 handle 始终读到当前 viewRef
+  useImperativeHandle(
+    ref,
+    () => ({
+      get view() {
+        return viewRef.current;
+      },
+    }),
+    [],
+  );
   // Tracks the docKey of the value currently in the editor (see value-sync below).
   const lastDocKeyRef = useRef(docKey);
   const themeCompartment = useRef(new Compartment());

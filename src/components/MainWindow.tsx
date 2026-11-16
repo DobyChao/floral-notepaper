@@ -16,7 +16,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { exportMarkdownNote, importMarkdownNote } from "../features/importExport/api";
 import { MarkdownPreviewLazy as MarkdownPreview } from "../features/markdown/MarkdownPreviewLazy";
-import { LiveEditor } from "../features/markdown/LiveEditor";
+import { LiveEditor, type LiveEditorHandle } from "../features/markdown/LiveEditor";
+import { toggleHighlightSelection } from "../features/markdown/highlightSelection";
+import type { EditorView } from "@codemirror/view";
 import { showToast } from "./Toast";
 import {
   createScrollSyncMap,
@@ -136,6 +138,7 @@ interface CategoryMenuState {
 type FormatAction =
   | "bold"
   | "italic"
+  | "highlight"
   | "heading"
   | "hr"
   | "ul"
@@ -145,14 +148,21 @@ type FormatAction =
   | "inlineMath"
   | "blockMath";
 
-function applyFormat(
-  textarea: HTMLTextAreaElement,
+interface FormatEdit {
+  result: string;
+  cursorStart: number;
+  cursorEnd: number;
+}
+
+// 工具栏格式动作的纯文本改写：输入全文与选区，输出改写后的全文与光标范围。
+// textarea（编辑/分栏）与 CodeMirror（即时）两种宿主共用这套规则。
+function computeFormat(
   action: FormatAction,
+  value: string,
+  start: number,
+  end: number,
   translate: TFunction,
-  setContent: (v: string) => void,
-  markDirty: () => void,
-) {
-  const { selectionStart: start, selectionEnd: end, value } = textarea;
+): FormatEdit {
   const selected = value.slice(start, end);
   const before = value.slice(0, start);
   const after = value.slice(end);
@@ -179,6 +189,14 @@ function applyFormat(
       result = before + wrapped + after;
       cursorStart = start + 1;
       cursorEnd = cursorStart + (selected || fallback).length;
+      break;
+    }
+    case "highlight": {
+      const fallback = translate("main.formatSample.highlightText", { defaultValue: "高亮文本" });
+      const edit = toggleHighlightSelection(value, start, end, fallback);
+      result = edit.result;
+      cursorStart = edit.cursorStart;
+      cursorEnd = edit.cursorEnd;
       break;
     }
     case "heading": {
@@ -301,6 +319,19 @@ function applyFormat(
     }
   }
 
+  return { result, cursorStart, cursorEnd };
+}
+
+function applyFormat(
+  textarea: HTMLTextAreaElement,
+  action: FormatAction,
+  translate: TFunction,
+  setContent: (v: string) => void,
+  markDirty: () => void,
+) {
+  const { selectionStart: start, selectionEnd: end, value } = textarea;
+  const { result, cursorStart, cursorEnd } = computeFormat(action, value, start, end, translate);
+
   // Selecting the whole value scrolls the textarea to the top; capture the
   // scroll offset so we can restore the viewport after replacing the content.
   const previousScrollTop = textarea.scrollTop;
@@ -312,6 +343,20 @@ function applyFormat(
   requestAnimationFrame(() => {
     textarea.setSelectionRange(cursorStart, cursorEnd);
     textarea.scrollTop = previousScrollTop;
+  });
+}
+
+// 即时（Live）视图没有 textarea，工具栏动作改写到 CodeMirror：整篇替换为
+// computeFormat 的结果并把光标落在内容上，updateListener 会照常上报
+// onChange（setContent + markDirty），撤销/重做由 CM history 统一管理。
+function applyFormatToView(view: EditorView, action: FormatAction, translate: TFunction) {
+  const { from, to } = view.state.selection.main;
+  const edit = computeFormat(action, view.state.doc.toString(), from, to, translate);
+  view.focus();
+  view.dispatch({
+    changes: { from: 0, to: view.state.doc.length, insert: edit.result },
+    selection: { anchor: edit.cursorStart, head: edit.cursorEnd },
+    scrollIntoView: true,
   });
 }
 
@@ -419,6 +464,8 @@ export function MainWindow({
   const { popupRef: categoryMenuRef, popupPosition: categoryMenuPosition } =
     useViewportPopupPosition(categoryMenu, categoryMenuConfirmDelete);
   const contentRef = useRef<HTMLTextAreaElement>(null);
+  // 即时视图的 CodeMirror 实例句柄：工具栏格式动作改写到 CM 而非 textarea
+  const liveEditorRef = useRef<LiveEditorHandle>(null);
   const windowLabelRef = useRef("main");
   const previewScrollRef = useRef<HTMLDivElement>(null);
   const scrollMaps = useRef<{
@@ -513,6 +560,12 @@ export function MainWindow({
         action: "italic",
       },
       {
+        label: "==",
+        title: t("main.toolbar.highlight", { defaultValue: "高亮" }),
+        style: "font-mono text-[9px]",
+        action: "highlight",
+      },
+      {
         label: "H",
         title: t("main.toolbar.heading", { defaultValue: "标题" }),
         style: "font-bold",
@@ -562,6 +615,23 @@ export function MainWindow({
       },
     ],
     [t],
+  );
+  // 编辑/分栏（textarea）与即时（CodeMirror）共用同一排工具栏按钮，
+  // 只由 runAction 决定动作落到哪种编辑器上
+  const renderToolbar = (runAction: (action: FormatAction) => void) => (
+    <div className="flex items-center gap-0.5 shrink-0">
+      {toolbarButtons.map((button) => (
+        <button
+          key={button.label}
+          title={button.title}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => runAction(button.action)}
+          className={`w-6 h-6 flex items-center justify-center rounded text-[11px] text-ink-ghost hover:text-ink-faint hover:bg-paper-warm transition-all cursor-pointer ${button.style}`}
+        >
+          {button.label}
+        </button>
+      ))}
+    </div>
   );
   const viewModeOptions = useMemo(
     () => [
@@ -3070,28 +3140,12 @@ export function MainWindow({
                       className="flex flex-col min-h-0 shrink-0"
                       style={{ width: viewMode === "split" ? `${splitRatio * 100}%` : "100%" }}
                     >
-                      <div className="flex items-center gap-0.5 px-4 pt-2 pb-1 shrink-0">
-                        {toolbarButtons.map((button) => (
-                          <button
-                            key={button.label}
-                            title={button.title}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => {
-                              if (contentRef.current) {
-                                applyFormat(
-                                  contentRef.current,
-                                  button.action,
-                                  t,
-                                  setContent,
-                                  markDirty,
-                                );
-                              }
-                            }}
-                            className={`w-6 h-6 flex items-center justify-center rounded text-[11px] text-ink-ghost hover:text-ink-faint hover:bg-paper-warm transition-all cursor-pointer ${button.style}`}
-                          >
-                            {button.label}
-                          </button>
-                        ))}
+                      <div className="px-4 pt-2 pb-1 shrink-0">
+                        {renderToolbar((action) => {
+                          if (contentRef.current) {
+                            applyFormat(contentRef.current, action, t, setContent, markDirty);
+                          }
+                        })}
                       </div>
 
                       <div className="flex-1 overflow-hidden px-5 pb-4">
@@ -3183,24 +3237,33 @@ export function MainWindow({
                   )}
 
                   {viewMode === "live" && (
-                    <div className="flex flex-col min-h-0 min-w-0 flex-1 px-6 pt-3 pb-2">
-                      <LiveEditor
-                        value={content}
-                        docKey={selectedId ?? undefined}
-                        onChange={(next) => {
-                          setContent(next);
-                          markDirty();
-                        }}
-                        fontSize={settingsConfig?.fontSize ?? 14}
-                        resolveImageSrc={resolveLiveImageSrc}
-                        showCodeLineNumbers={settingsConfig?.codeBlockLineNumbers ?? false}
-                        showEditorLineNumbers={settingsConfig?.editorLineNumbers ?? false}
-                        activeHighlight={settingsConfig?.liveActiveHighlight ?? "off"}
-                        codeWrap={settingsConfig?.codeWrap ?? true}
-                        placeholder={t("main.editor.contentPlaceholder", {
-                          defaultValue: "开始写作……",
+                    <div className="flex flex-col min-h-0 min-w-0 flex-1">
+                      <div className="px-4 pt-2 pb-1 shrink-0">
+                        {renderToolbar((action) => {
+                          const view = liveEditorRef.current?.view;
+                          if (view) applyFormatToView(view, action, t);
                         })}
-                      />
+                      </div>
+                      <div className="flex-1 min-h-0 px-6 pb-2">
+                        <LiveEditor
+                          ref={liveEditorRef}
+                          value={content}
+                          docKey={selectedId ?? undefined}
+                          onChange={(next) => {
+                            setContent(next);
+                            markDirty();
+                          }}
+                          fontSize={settingsConfig?.fontSize ?? 14}
+                          resolveImageSrc={resolveLiveImageSrc}
+                          showCodeLineNumbers={settingsConfig?.codeBlockLineNumbers ?? false}
+                          showEditorLineNumbers={settingsConfig?.editorLineNumbers ?? false}
+                          activeHighlight={settingsConfig?.liveActiveHighlight ?? "off"}
+                          codeWrap={settingsConfig?.codeWrap ?? true}
+                          placeholder={t("main.editor.contentPlaceholder", {
+                            defaultValue: "开始写作……",
+                          })}
+                        />
+                      </div>
                     </div>
                   )}
                 </>
