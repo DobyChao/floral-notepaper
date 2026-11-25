@@ -41,11 +41,18 @@ import { resolveMarkdownImageSrc } from "../features/markdown/imageSrc";
 import {
   chooseDataDirectory,
   getConfig,
+  isSameConfig,
   migrateDataDir,
   normalizeViewMode,
   saveConfig,
 } from "../features/settings/api";
 import type { AppConfig, ViewMode } from "../features/settings/types";
+import {
+  FONT_ZOOM_DEFAULT,
+  getFontZoomDirection,
+  isFontZoomEventTargetBlocked,
+  nextFontSize,
+} from "../features/settings/fontZoom";
 import { normalizeTileColor } from "../features/settings/tileColor";
 import { getUpdateStatus, reportInstallPreparation } from "../features/update/api";
 import {
@@ -411,6 +418,16 @@ export function MainWindow({
   const [viewMode, setViewMode] = useState<ViewMode>(
     normalizeViewMode(initialConfig?.defaultViewMode ?? "split"),
   );
+  // 配置里的「默认视图」只在相对上次已应用的值确实变化时才切换当前视图：
+  // 字号缩放等不经过设置面板的配置变更同样会广播 config-changed / 回传保存结果，
+  // 不能因此把用户手动切到的即时/预览视图误切回默认视图
+  const appliedDefaultViewModeRef = useRef<ViewMode>(viewMode);
+  const syncDefaultViewMode = useCallback((config: Pick<AppConfig, "defaultViewMode">) => {
+    const nextViewMode = normalizeViewMode(config.defaultViewMode);
+    if (nextViewMode === appliedDefaultViewModeRef.current) return;
+    appliedDefaultViewModeRef.current = nextViewMode;
+    setViewMode(nextViewMode);
+  }, []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [content, setContent] = useState("");
   const [title, setTitle] = useState("");
@@ -820,7 +837,7 @@ export function MainWindow({
         if (cancelled) return;
         setSettingsConfig(loadedConfig);
         setSavedDataDir(loadedConfig.dataDir);
-        setViewMode(normalizeViewMode(loadedConfig.defaultViewMode));
+        syncDefaultViewMode(loadedConfig);
         setNotes(loadedNotes);
         setCategories(loadedCategories);
         setCollapsedCategories(new Set(loadedCategories));
@@ -848,7 +865,21 @@ export function MainWindow({
     return () => {
       cancelled = true;
     };
-  }, [applyNote, clearCurrentNote]);
+  }, [applyNote, clearCurrentNote, syncDefaultViewMode]);
+
+  // 其它窗口（便签/磁贴的字号缩放）与后端（托盘开关、保存回传）广播的配置变更同步到设置状态。
+  // 本窗口自己 emit 的回声与当前状态内容一致，保留原对象以跳过无谓的重渲染
+  useEffect(() => {
+    const unlisten = listen<AppConfig>("config-changed", (event) => {
+      const nextConfig = event.payload;
+      setSettingsConfig((current) => (isSameConfig(current, nextConfig) ? current : nextConfig));
+      setSavedDataDir(nextConfig.dataDir);
+      syncDefaultViewMode(nextConfig);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [syncDefaultViewMode]);
 
   useEffect(() => {
     let active = true;
@@ -1388,7 +1419,7 @@ export function MainWindow({
       const config = await getConfig();
       setSettingsConfig(config);
       setSavedDataDir(config.dataDir);
-      setViewMode(normalizeViewMode(config.defaultViewMode));
+      syncDefaultViewMode(config);
     } catch (error) {
       showToast(getErrorMessage(error));
     }
@@ -1440,7 +1471,7 @@ export function MainWindow({
           const savedConfig = await saveConfig(normalizedConfig);
           setSettingsConfig(savedConfig);
           setSavedDataDir(savedConfig.dataDir);
-          setViewMode(normalizeViewMode(savedConfig.defaultViewMode));
+          syncDefaultViewMode(savedConfig);
 
           if (savedConfig.dataDir !== previousDataDir) {
             const loadedNotes = await refreshNotes();
@@ -1455,7 +1486,7 @@ export function MainWindow({
         }
       }, 300);
     },
-    [savedDataDir, refreshNotes, loadNote, clearCurrentNote],
+    [savedDataDir, refreshNotes, loadNote, clearCurrentNote, syncDefaultViewMode],
   );
 
   const handleSettingsChange = useCallback(
@@ -1466,6 +1497,28 @@ export function MainWindow({
     },
     [persistSettings],
   );
+
+  // 字号缩放快捷键（Ctrl/Cmd 与 + / - / 0）：与设置面板滑块共用 handleSettingsChange，
+  // 即同步配置、广播 config-changed 并防抖保存；编辑/预览/即时三处视图随 fontSize 联动
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const direction = getFontZoomDirection(event);
+      // 录制全局快捷键时按下的组合键是在「录入快捷键」，不触发缩放
+      if (!direction || isFontZoomEventTargetBlocked(event.target)) return;
+
+      event.preventDefault();
+      if (!settingsConfig) return;
+
+      const currentSize = settingsConfig.fontSize ?? FONT_ZOOM_DEFAULT;
+      const fontSize = nextFontSize(currentSize, direction);
+      if (fontSize === currentSize) return;
+
+      handleSettingsChange({ ...settingsConfig, fontSize });
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleSettingsChange, settingsConfig]);
 
   const handleCloseSettings = useCallback(() => {
     setSettingsOpen(false);

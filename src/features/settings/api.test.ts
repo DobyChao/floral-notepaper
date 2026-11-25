@@ -5,6 +5,7 @@ import {
   checkGlobalShortcut,
   chooseDataDirectory,
   getConfig,
+  isSameConfig,
   normalizeViewMode,
   saveConfig,
 } from "./api";
@@ -126,6 +127,15 @@ describe("settings api", () => {
     expect(normalizeViewMode("preview")).toBe("preview");
     expect(normalizeViewMode("live")).toBe("live");
     expect(normalizeViewMode("unknown")).toBe("split");
+  });
+
+  test("compares configs field by field so echoed payloads can be skipped", () => {
+    const config = { locale: "zh-CN", fontSize: 14, defaultViewMode: "split" } as AppConfig;
+
+    expect(isSameConfig(config, { ...config })).toBe(true);
+    expect(isSameConfig(config, { ...config, fontSize: 15 })).toBe(false);
+    expect(isSameConfig(config, { ...config, surfaceWidth: undefined })).toBe(true);
+    expect(isSameConfig(null, config)).toBe(false);
   });
 
   test("chooses a data directory through the folder picker", async () => {

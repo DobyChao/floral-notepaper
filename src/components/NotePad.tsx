@@ -10,7 +10,7 @@ import type { UpdateInstallPrepareRequest } from "../features/update/types";
 import { showToast } from "./Toast";
 import type { Note, NoteMetadata } from "../features/notes/types";
 import { countNoteChars, metadataFromNote } from "../features/notes/noteUtils";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   animateCurrentWindowBounds,
@@ -27,13 +27,19 @@ import {
 } from "../features/windows/controls";
 import type { ResizeDirection } from "../features/windows/controls";
 import type { WindowBounds } from "../features/windows/api";
-import { getConfig } from "../features/settings/api";
+import { getConfig, saveConfig } from "../features/settings/api";
+import {
+  getFontZoomDirection,
+  isFontZoomEventTargetBlocked,
+  nextFontSize,
+} from "../features/settings/fontZoom";
+import type { FontZoomDirection } from "../features/settings/fontZoom";
 import {
   DEFAULT_TILE_COLOR,
   normalizeTileColor,
   resolveTileColor,
 } from "../features/settings/tileColor";
-import type { TileColorMode } from "../features/settings/types";
+import type { AppConfig, TileColorMode } from "../features/settings/types";
 import {
   shouldEnterPadFromTileOnDoubleClick,
   shouldReturnToTileAfterManualSave,
@@ -156,6 +162,10 @@ export function NotePad({
   const restingSurfaceBoundsRef = useRef<WindowBounds | null>(null);
   const windowLabelRef = useRef("");
   const statusRef = useRef<NotePadStatus>("empty");
+  // 最近一次已知的应用配置：表面字号缩放在它的基础上只改 surfaceFontSize 再广播/保存，
+  // 避免用一份缺字段的配置整体覆盖主窗口保存的其它设置
+  const appConfigRef = useRef<AppConfig | null>(null);
+  const surfaceFontZoomSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentValueRef = useRef(content);
   contentValueRef.current = content;
   const titleValueRef = useRef(title);
@@ -215,6 +225,7 @@ export function NotePad({
     async function bootstrap() {
       try {
         const [loadedConfig] = await Promise.all([getConfig(), refreshNotes()]);
+        appConfigRef.current = loadedConfig;
         if (!cancelled) {
           setNoteSurfaceAutoSave(loadedConfig.noteSurfaceAutoSave);
           setSurfaceFontSize(loadedConfig.surfaceFontSize ?? 14);
@@ -271,16 +282,8 @@ export function NotePad({
   }, []);
 
   useEffect(() => {
-    const unlisten = listen<{
-      tileColor?: string;
-      tileColorMode?: TileColorMode;
-      surfaceFontSize?: number;
-      tileRenderMarkdown?: boolean;
-      tileDoubleClickToEdit?: boolean;
-      tileSaveReturnsToPin?: boolean;
-      notepadEscClose?: boolean;
-      noteSurfaceAutoSave?: boolean;
-    }>("config-changed", (event) => {
+    const unlisten = listen<AppConfig>("config-changed", (event) => {
+      appConfigRef.current = event.payload;
       const mode = event.payload.tileColorMode ?? tileColorModeRef.current;
       const raw = event.payload.tileColor ?? tileColorRawRef.current;
       setTileColorMode(mode);
@@ -299,6 +302,14 @@ export function NotePad({
     });
     return () => {
       void unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (surfaceFontZoomSaveTimer.current) {
+        clearTimeout(surfaceFontZoomSaveTimer.current);
+      }
     };
   }, []);
 
@@ -582,8 +593,68 @@ export function NotePad({
     [clearPendingTileDrag, switchSurfaceMode, tileDoubleClickToEdit],
   );
 
+  // 便签/磁贴表面字号的缩放（Ctrl/Cmd 与 + / - / 0）：在最近已知配置的基础上改
+  // surfaceFontSize，立即生效并广播给其它窗口，300ms 防抖后整体保存
+  const queueSurfaceFontSizeConfigSave = useCallback((nextConfig: AppConfig) => {
+    if (surfaceFontZoomSaveTimer.current) {
+      clearTimeout(surfaceFontZoomSaveTimer.current);
+    }
+
+    surfaceFontZoomSaveTimer.current = setTimeout(() => {
+      const configToSave = appConfigRef.current ?? nextConfig;
+      void saveConfig(configToSave)
+        .then((savedConfig) => {
+          appConfigRef.current = savedConfig;
+        })
+        .catch((error) => showToast(getErrorMessage(error)));
+    }, 300);
+  }, []);
+
+  const applySurfaceFontZoom = useCallback(
+    (direction: FontZoomDirection | null) => {
+      if (!direction) return;
+
+      const applyConfig = (baseConfig: AppConfig) => {
+        const currentSize = baseConfig.surfaceFontSize ?? surfaceFontSize;
+        const nextSize = nextFontSize(currentSize, direction);
+        if (nextSize === currentSize) return;
+
+        const nextConfig = { ...baseConfig, surfaceFontSize: nextSize };
+        appConfigRef.current = nextConfig;
+        setSurfaceFontSize(nextSize);
+        void emit("config-changed", nextConfig);
+        queueSurfaceFontSizeConfigSave(nextConfig);
+      };
+
+      if (appConfigRef.current) {
+        applyConfig(appConfigRef.current);
+        return;
+      }
+
+      // 配置尚未加载到（启动初期）：先取一次再缩放
+      void getConfig()
+        .then((config) => {
+          appConfigRef.current = config;
+          applyConfig(config);
+        })
+        .catch((error) => showToast(getErrorMessage(error)));
+    },
+    [queueSurfaceFontSizeConfigSave, surfaceFontSize],
+  );
+  // 同 handleSaveRef：keydown 监听只注册一次，经 ref 取最新回调
+  const applySurfaceFontZoomRef = useRef(applySurfaceFontZoom);
+  applySurfaceFontZoomRef.current = applySurfaceFontZoom;
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      // 录制全局快捷键的容器内的按键属于「录入快捷键」，不触发缩放
+      const direction = getFontZoomDirection(event);
+      if (direction && !isFontZoomEventTargetBlocked(event.target)) {
+        event.preventDefault();
+        applySurfaceFontZoomRef.current(direction);
+        return;
+      }
+
       if ((event.ctrlKey || event.metaKey) && event.key === "s") {
         event.preventDefault();
         void handleSaveRef.current();
