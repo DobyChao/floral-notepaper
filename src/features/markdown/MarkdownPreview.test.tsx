@@ -60,6 +60,34 @@ describe("MarkdownPreview", () => {
     expect(markup).toContain("加粗</strong></mark>");
   });
 
+  // 单个 ~ 不是删除线（remarkGfm singleTilde: false）：同一段里两个单个 ~ 也不会配对
+  test.each(["0.2~3 μm / 微藻 3~20 μm", "a~b", "a~b c~d"])(
+    "does not strike through a lone tilde: %s",
+    (content) => {
+      for (const renderHtml of [false, true]) {
+        const markup = renderToStaticMarkup(
+          <MarkdownPreview content={content} renderHtml={renderHtml} />,
+        );
+
+        expect(markup).not.toContain("<del");
+        expect(markup).toContain(content);
+      }
+    },
+  );
+
+  test.each([
+    ["~~x~~", "<del>x</del>"],
+    ["~~已完成~~", "<del>已完成</del>"],
+  ])("still renders double-tilde strikethrough: %s", (content, expected) => {
+    for (const renderHtml of [false, true]) {
+      const markup = renderToStaticMarkup(
+        <MarkdownPreview content={content} renderHtml={renderHtml} />,
+      );
+
+      expect(markup).toContain(expected);
+    }
+  });
+
   test("keeps code block controls outside the horizontally scrollable pre", () => {
     const markup = renderToStaticMarkup(
       <MarkdownPreview content={"```text\nvery long code line\n```"} />,

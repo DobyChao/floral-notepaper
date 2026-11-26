@@ -96,6 +96,25 @@ describe("livePreview decorations", () => {
     view.destroy();
   });
 
+  // ── 删除线：lezer 只认 ~~，单个 ~ 不装饰 ──
+  test.each(["0.2~3 μm / 微藻 3~20 μm", "a~b"])("leaves a lone tilde literal: %s", (doc) => {
+    const { view, deco } = viewFor(doc, { resolveImageSrc: (s) => s });
+
+    expect(classNames(deco)).not.toContain("cm-md-strike");
+    view.destroy();
+  });
+
+  test("strikes through only the double-tilde span", () => {
+    // 光标停在末行：删除线样式落在整个 ~~x~~（8..13）上，两段 ~~ 记号被隐藏；
+    // 同一行的单个 ~（3~20）不在删除线区间内
+    const { view, deco } = viewFor("3~20 μm ~~x~~\n\n后文", { resolveImageSrc: (s) => s });
+
+    expect(hasMarkClass(deco, "cm-md-strike", 8, 13)).toBe(true);
+    expect(hasReplaceCovering(deco, 8, 10)).toBe(true);
+    expect(hasReplaceCovering(deco, 11, 13)).toBe(true);
+    view.destroy();
+  });
+
   test("styles fenced code lines and attaches the toolbar widget", () => {
     const doc = "```js\nconst a = 1;\nconst b = 2;\n```";
     const { view, deco } = viewFor(doc, { resolveImageSrc: (s) => s });
