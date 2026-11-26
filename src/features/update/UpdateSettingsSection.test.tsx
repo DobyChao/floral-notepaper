@@ -103,6 +103,24 @@ describe("UpdateSettingsSection", () => {
     expect(markup).not.toContain("sr-only");
   });
 
+  test("gives the update switches a visible keyboard focus ring", () => {
+    const markup = renderToStaticMarkup(
+      <UpdateSettingsSection
+        initialSettings={settings}
+        initialStatus={status}
+        mode="settingsOnly"
+      />,
+    );
+
+    const switches = markup.match(/<button[^>]*role="switch"[^>]*>/g) ?? [];
+    expect(switches).toHaveLength(2);
+    for (const tag of switches) {
+      expect(tag).toContain("focus-visible:outline-none");
+      expect(tag).toContain("focus-visible:ring-2");
+      expect(tag).toContain("focus-visible:ring-bamboo/50");
+    }
+  });
+
   test("preserves non-standard check interval values in the settings UI", () => {
     const markup = renderToStaticMarkup(
       <UpdateSettingsSection

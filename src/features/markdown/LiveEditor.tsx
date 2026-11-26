@@ -3,12 +3,11 @@ import { Annotation, Compartment, EditorState, type TransactionSpec } from "@cod
 import {
   EditorView,
   highlightActiveLine,
-  keymap,
   lineNumbers,
   placeholder as cmPlaceholder,
 } from "@codemirror/view";
-import { history, historyKeymap, defaultKeymap, indentWithTab } from "@codemirror/commands";
-import { markdown, markdownLanguage, markdownKeymap } from "@codemirror/lang-markdown";
+import { history } from "@codemirror/commands";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { codeFolding } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 
@@ -24,6 +23,7 @@ const codeFoldingExtension = codeFolding({
   },
 });
 import { liveEditorTheme, liveHighlighting } from "./liveEditor/theme";
+import { liveEditorKeymap } from "./liveEditor/keymap";
 import { livePreview } from "./liveEditor/livePreview";
 
 export interface LiveEditorProps {
@@ -132,7 +132,7 @@ export function LiveEditor({
       state: EditorState.create({
         doc: value,
         extensions: [
-          keymap.of([...markdownKeymap, indentWithTab, ...defaultKeymap, ...historyKeymap]),
+          liveEditorKeymap,
           history(),
           lineNumbersCompartment.current.of(showEditorLineNumbers ? lineNumbers() : []),
           activeLineCompartment.current.of(activeHighlight === "line" ? highlightActiveLine() : []),

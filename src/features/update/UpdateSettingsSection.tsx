@@ -675,14 +675,14 @@ export function UpdateSettingsSection({
                     placeholder={t("settings.update.mirrorChyan.placeholder", {
                       defaultValue: "点击输入文本",
                     })}
-                    className="min-w-0 w-full h-8 px-2.5 pr-8 rounded-lg bg-paper-warm/70 border border-paper-deep/40 text-[12px] font-mono text-ink-soft outline-none focus:border-bamboo/40 focus:bg-paper-warm/90 transition-colors"
+                    className="min-w-0 w-full h-8 px-2.5 pr-8 rounded-lg bg-paper-warm/70 border border-paper-deep/40 text-[12px] font-mono text-ink-soft outline-none focus:border-bamboo/40 focus:bg-paper-warm/90 focus-visible:ring-2 focus-visible:ring-bamboo/50 transition-colors"
                   />
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowCdk((prev) => !prev)}
                   disabled={!cdkInput}
-                  className="h-8 w-8 flex items-center justify-center rounded-lg border border-paper-deep/45 text-ink-ghost hover:text-ink-faint hover:bg-paper-warm disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer shrink-0"
+                  className="h-8 w-8 flex items-center justify-center rounded-lg border border-paper-deep/45 text-ink-ghost hover:text-ink-faint hover:bg-paper-warm disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bamboo/50"
                   title={
                     showCdk
                       ? t("settings.update.mirrorChyan.hideCdk", {
@@ -731,7 +731,7 @@ export function UpdateSettingsSection({
                 <button
                   type="button"
                   onClick={() => void openUrl("https://mirrorchyan.com")}
-                  className="inline-flex items-center gap-0.5 text-ink-faint hover:text-bamboo cursor-pointer transition-colors"
+                  className="inline-flex items-center gap-0.5 text-ink-faint hover:text-bamboo cursor-pointer transition-colors rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bamboo/50"
                 >
                   Mirror酱
                   <svg
@@ -958,7 +958,7 @@ function UpdateToggleRow({ label, checked, disabled = false, onChange }: UpdateT
       onClick={() => {
         if (!disabled) onChange(!checked);
       }}
-      className={`w-full text-left flex items-center justify-between h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25 ${
+      className={`w-full text-left flex items-center justify-between h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bamboo/50 ${
         disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
       }`}
     >

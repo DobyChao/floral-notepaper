@@ -1,5 +1,10 @@
-import { describe, expect, test } from "vitest";
-import { formatHeldKeys, hotkeyToConfigString, isValidGlobalShortcut } from "./shortcutRecorder";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import {
+  formatHeldKeys,
+  hotkeyToConfigString,
+  isShortcutRecordingEscape,
+  isValidGlobalShortcut,
+} from "./shortcutRecorder";
 
 describe("shortcutRecorder", () => {
   test("serializes meta shortcuts into config strings", () => {
@@ -31,5 +36,24 @@ describe("shortcutRecorder", () => {
 
   test("formats held mac keys with Command before Option", () => {
     expect(formatHeldKeys(["Alt", "Meta", "N"], "mac")).toBe("Command + Option + N");
+  });
+});
+
+// DOM 下的判定（面板里有录制器 / 事件目标在录制器内）在 SettingsPanel.test.tsx 里覆盖
+describe("isShortcutRecordingEscape", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("never claims Esc without a DOM (Node / Vitest)", () => {
+    vi.stubGlobal("Element", undefined);
+
+    expect(isShortcutRecordingEscape(null, null)).toBe(false);
+    expect(
+      isShortcutRecordingEscape(
+        { querySelector: () => ({}) } as unknown as ParentNode,
+        {} as EventTarget,
+      ),
+    ).toBe(false);
   });
 });
