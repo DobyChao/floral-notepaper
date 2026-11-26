@@ -114,3 +114,20 @@ export function formatHeldKeys(keys: string[], platform: ShortcutPlatform = "win
   const displayNames = platform === "mac" ? MAC_KEY_DISPLAY_NAMES : KEY_DISPLAY_NAMES;
   return all.map((k) => displayNames[k] ?? k).join(" + ");
 }
+
+// 与 SettingsPanel 里 ShortcutRecorder 容器上的 data 属性保持一致
+const RECORDING_SELECTOR = '[data-shortcut-recorder-recording="true"]';
+
+/**
+ * 这次 Esc 是否属于快捷键录制：面板里有录制器正在录制，或按键就发生在录制器里。
+ * 此时 Esc 是「取消录制」，必须留给 useShortcutRecorder，不能当成关闭设置面板。
+ */
+export function isShortcutRecordingEscape(
+  panel: ParentNode | null,
+  target: EventTarget | null,
+): boolean {
+  // Node / Vitest 等无 DOM 环境没有 Element
+  if (typeof Element === "undefined") return false;
+  if (panel?.querySelector(RECORDING_SELECTOR)) return true;
+  return target instanceof Element && Boolean(target.closest(RECORDING_SELECTOR));
+}

@@ -55,7 +55,7 @@ export function SlidingButtonGroup<T extends string>({
           }}
           type="button"
           onClick={() => onChange(option.value)}
-          className={`relative z-[1] flex-1 rounded-md text-[11px] transition-colors duration-200 cursor-pointer ${buttonClassName} ${
+          className={`relative z-[1] flex-1 rounded-md text-[11px] transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bamboo/50 ${buttonClassName} ${
             value === option.value
               ? "text-bamboo font-medium"
               : "text-ink-ghost hover:text-ink-faint"

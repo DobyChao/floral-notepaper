@@ -68,6 +68,7 @@ import type {
   UpdateState,
 } from "../features/update/types";
 import { BackgroundLayer } from "./BackgroundLayer";
+import { focusFirstMenuItem, handleMenuKeyDown } from "./menuKeyboard";
 import { POPUP_VIEWPORT_MARGIN, useViewportPopupPosition } from "./popupPosition";
 import { SlidingButtonGroup } from "./SlidingButtonGroup";
 import {
@@ -100,6 +101,7 @@ import {
   metadataFromNote,
 } from "../features/notes/noteUtils";
 import type { CategoryGroup } from "../features/notes/noteUtils";
+import { getNoteMenuAnchor, handleNoteItemKey } from "../features/notes/noteListKeyboard";
 import {
   getNoteContextMenuItems,
   type NoteContextMenuAction,
@@ -1245,6 +1247,19 @@ export function MainWindow({
     (document.activeElement as HTMLElement | null)?.blur();
   }, []);
 
+  // 菜单打开 / 切换子面板（主菜单 ↔ 移动到分类、删除确认）时聚焦首个菜单项，纯键盘即可操作
+  useEffect(() => {
+    if (!noteMenu || noteMenuClosing) return;
+    const frame = requestAnimationFrame(() => focusFirstMenuItem(noteMenuRef.current));
+    return () => cancelAnimationFrame(frame);
+  }, [noteMenu, noteMenuClosing, noteMenuMode]);
+
+  useEffect(() => {
+    if (!categoryMenu || categoryMenuClosing) return;
+    const frame = requestAnimationFrame(() => focusFirstMenuItem(categoryMenuRef.current));
+    return () => cancelAnimationFrame(frame);
+  }, [categoryMenu, categoryMenuClosing, categoryMenuConfirmDelete]);
+
   const performSave = useCallback(
     async (force: boolean): Promise<boolean> => {
       // 非强制保存（自动保存、切换前保存）在没有未保存修改时直接视为成功
@@ -1740,16 +1755,44 @@ export function MainWindow({
     }
   };
 
+  // 键盘唤出（Shift+F10 / ContextMenu 键）右键菜单时记下唤出它的笔记项，
+  // Esc 关闭菜单后把焦点还回去，键盘操作不至于掉回页面顶部
+  const noteMenuOpenerRef = useRef<HTMLElement | null>(null);
+
+  const openNoteMenuAt = (x: number, y: number, noteId: string, opener: HTMLElement | null) => {
+    noteMenuOpenerRef.current = opener;
+    setNoteMenuClosing(false);
+    setHoveredId(noteId);
+    setNoteMenu({
+      x,
+      y,
+      noteId,
+    });
+  };
+
   const handleOpenNoteMenu = (event: MouseEvent<HTMLElement>, noteId: string) => {
     event.preventDefault();
     event.stopPropagation();
 
-    setNoteMenuClosing(false);
-    setHoveredId(noteId);
-    setNoteMenu({
-      x: event.clientX,
-      y: event.clientY,
-      noteId,
+    openNoteMenuAt(event.clientX, event.clientY, noteId, null);
+  };
+
+  // Esc 关闭笔记菜单：焦点回到唤出它的笔记项（该项已被删除 / 移走时不处理）
+  const closeNoteMenuFromKeyboard = () => {
+    const opener = noteMenuOpenerRef.current;
+    noteMenuOpenerRef.current = null;
+    if (opener?.isConnected) opener.focus();
+    setNoteMenuClosing(true);
+  };
+
+  // ↑/↓ 在可见笔记项间移动焦点（跨分类分组），Enter 打开笔记，Shift+F10 / ContextMenu 键唤出右键菜单
+  const handleNoteKeyDown = (e: React.KeyboardEvent<HTMLDivElement>, noteId: string) => {
+    handleNoteItemKey(e, {
+      openNote: () => void handleSelectNote(noteId),
+      openNoteMenu: (anchor) => {
+        const anchorPoint = getNoteMenuAnchor(anchor);
+        openNoteMenuAt(anchorPoint.x, anchorPoint.y, noteId, anchor);
+      },
     });
   };
 
@@ -2565,7 +2608,7 @@ export function MainWindow({
                 </div>
               )}
 
-              <div className="flex-1 overflow-y-auto px-2 pb-2">
+              <div className="flex-1 overflow-y-auto px-2 pb-2" data-note-list="true">
                 <div className="space-y-0.5">
                   {externalFiles.length > 0 && (
                     <>
@@ -2683,16 +2726,19 @@ export function MainWindow({
                             return (
                               <div
                                 key={note.id}
+                                tabIndex={0}
+                                data-note-item="true"
                                 draggable
                                 onDragStart={(e) => {
                                   e.dataTransfer.setData("text/plain", note.id);
                                   e.dataTransfer.effectAllowed = "move";
                                 }}
                                 onClick={() => void handleSelectNote(note.id)}
+                                onKeyDown={(e) => handleNoteKeyDown(e, note.id)}
                                 onContextMenu={(event) => handleOpenNoteMenu(event, note.id)}
                                 onMouseEnter={() => setHoveredId(note.id)}
                                 onMouseLeave={() => setHoveredId(null)}
-                                className={`w-full text-left rounded-xl px-3 py-2.5 transition-all duration-[600ms] cursor-pointer group relative ${
+                                className={`w-full text-left rounded-xl px-3 py-2.5 transition-colors duration-[600ms] cursor-pointer group relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bamboo/50 ${
                                   isSelected
                                     ? "bg-bamboo-mist/70"
                                     : isHovered
@@ -2828,7 +2874,13 @@ export function MainWindow({
                           </span>
                         </div>
 
-                        <div className={`category-body ${isCollapsed ? "" : "expanded"}`}>
+                        <div
+                          className={`category-body ${isCollapsed ? "" : "expanded"}`}
+                          // 收起时笔记项仍在 DOM 里：inert 让它们退出 Tab 顺序与无障碍树，
+                          // data 属性供 ↑/↓ 导航跳过
+                          inert={isCollapsed}
+                          data-category-collapsed={isCollapsed ? "true" : undefined}
+                        >
                           <div
                             className="category-body-inner bg-bamboo/[0.03] border border-t-0 border-bamboo/10 rounded-b-lg pb-1 pt-1"
                             onDragOver={(e) => {
@@ -2860,16 +2912,19 @@ export function MainWindow({
                                 return (
                                   <div
                                     key={note.id}
+                                    tabIndex={0}
+                                    data-note-item="true"
                                     draggable
                                     onDragStart={(e) => {
                                       e.dataTransfer.setData("text/plain", note.id);
                                       e.dataTransfer.effectAllowed = "move";
                                     }}
                                     onClick={() => void handleSelectNote(note.id)}
+                                    onKeyDown={(e) => handleNoteKeyDown(e, note.id)}
                                     onContextMenu={(event) => handleOpenNoteMenu(event, note.id)}
                                     onMouseEnter={() => setHoveredId(note.id)}
                                     onMouseLeave={() => setHoveredId(null)}
-                                    className={`w-full text-left rounded-lg mx-1 px-2.5 py-2 transition-all duration-[600ms] cursor-pointer group relative ${
+                                    className={`w-full text-left rounded-lg mx-1 px-2.5 py-2 transition-colors duration-[600ms] cursor-pointer group relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bamboo/50 ${
                                       isSelected
                                         ? "bg-bamboo-mist/70"
                                         : isHovered
@@ -3221,6 +3276,13 @@ export function MainWindow({
                           onDrop={imageDropHandler}
                           onDragOver={imageDragOverHandler}
                           onScroll={handleEditorScroll}
+                          onKeyDown={(e) => {
+                            // Esc 释放焦点（焦点交给后续的 Tab 导航），不关窗；
+                            // 输入法组合中的 Esc 是在取消候选，不处理
+                            if (e.key === "Escape" && !e.nativeEvent.isComposing) {
+                              e.currentTarget.blur();
+                            }
+                          }}
                           className="w-full h-full leading-[1.9] text-ink-soft font-body placeholder:text-ink-ghost/40"
                           style={{
                             fontSize: `${settingsConfig?.fontSize ?? 14}px`,
@@ -3419,6 +3481,8 @@ export function MainWindow({
       {noteMenu && noteMenuTarget && (
         <div
           ref={noteMenuRef}
+          role="menu"
+          tabIndex={-1}
           className={`popup-menu fixed z-[9999] min-w-[168px] py-1.5 bg-cloud/95 backdrop-blur-sm border border-paper-deep/50 rounded-lg overflow-x-hidden overflow-y-auto select-none ${noteMenuClosing ? "animate-menu-exit" : "animate-menu-enter"}`}
           style={{
             left: noteMenuPosition?.x ?? noteMenu.x,
@@ -3427,14 +3491,20 @@ export function MainWindow({
             maxHeight: `calc(100vh - ${POPUP_VIEWPORT_MARGIN * 2}px)`,
           }}
           onMouseDown={(event) => event.stopPropagation()}
+          onKeyDown={(e) => {
+            if (handleMenuKeyDown(e.currentTarget, e.key, closeNoteMenuFromKeyboard)) {
+              e.preventDefault();
+            }
+          }}
         >
           {noteMenuMode === "main" ? (
             <div key="main" className="animate-menu-slide-right">
               {noteContextMenuItems.map((item, index) => (
                 <button
                   key={item.action}
+                  role="menuitem"
                   onClick={() => handleNoteMenuAction(item.action)}
-                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] font-body transition-colors cursor-pointer ${
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] font-body transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bamboo/50 ${
                     item.tone === "danger"
                       ? "text-red-400 hover:bg-danger-bg hover:text-red-500"
                       : "text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo"
@@ -3447,8 +3517,9 @@ export function MainWindow({
           ) : (
             <div key="move" className="animate-menu-slide-left">
               <button
+                role="menuitem"
                 onClick={() => setNoteMenuMode("main")}
-                className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-body text-ink-ghost hover:bg-paper-warm transition-colors cursor-pointer border-b border-paper-deep/20"
+                className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-body text-ink-ghost hover:bg-paper-warm transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bamboo/50 border-b border-paper-deep/20"
               >
                 <svg
                   width="10"
@@ -3465,16 +3536,18 @@ export function MainWindow({
                 <span>{t("common.back", { defaultValue: "返回" })}</span>
               </button>
               <button
+                role="menuitem"
                 onClick={() => void handleMoveNote(noteMenuTarget.id, "")}
-                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bamboo/50"
               >
                 {t("main.category.uncategorized", { defaultValue: "未分类" })}
               </button>
               {categories.map((cat) => (
                 <button
                   key={cat}
+                  role="menuitem"
                   onClick={() => void handleMoveNote(noteMenuTarget.id, cat)}
-                  className="w-full text-left px-3 py-1.5 text-[12px] font-body text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo transition-colors cursor-pointer"
+                  className="w-full text-left px-3 py-1.5 text-[12px] font-body text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bamboo/50"
                 >
                   {cat}
                 </button>
@@ -3487,6 +3560,8 @@ export function MainWindow({
       {categoryMenu && (
         <div
           ref={categoryMenuRef}
+          role="menu"
+          tabIndex={-1}
           className={`popup-menu fixed z-[9999] min-w-[140px] py-1.5 bg-cloud/95 backdrop-blur-sm border border-paper-deep/50 rounded-lg overflow-x-hidden overflow-y-auto select-none ${categoryMenuClosing ? "animate-menu-exit" : "animate-menu-enter"}`}
           data-hover-suppressed={categoryMenuHoverSuppressed ? "" : undefined}
           style={{
@@ -3496,6 +3571,11 @@ export function MainWindow({
             maxHeight: `calc(100vh - ${POPUP_VIEWPORT_MARGIN * 2}px)`,
           }}
           onMouseDown={(event) => event.stopPropagation()}
+          onKeyDown={(e) => {
+            if (handleMenuKeyDown(e.currentTarget, e.key, () => setCategoryMenuClosing(true))) {
+              e.preventDefault();
+            }
+          }}
         >
           {categoryMenuConfirmDelete ? (
             <div key="category-confirm" className="animate-menu-slide-left">
@@ -3506,19 +3586,21 @@ export function MainWindow({
                 })}
               </div>
               <button
+                role="menuitem"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
                   void handleDeleteCategory(categoryMenu.category);
                   setCategoryMenuClosing(true);
                 }}
-                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-red-400 hover:bg-danger-bg hover:text-red-500 transition-colors cursor-pointer outline-none"
+                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-red-400 hover:bg-danger-bg hover:text-red-500 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bamboo/50"
               >
                 {t("main.category.confirmDeleteAction", { defaultValue: "确认删除" })}
               </button>
               <button
+                role="menuitem"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => switchCategoryMenuPanel(false)}
-                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo transition-colors cursor-pointer outline-none"
+                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bamboo/50"
               >
                 {t("common.cancel", { defaultValue: "取消" })}
               </button>
@@ -3526,19 +3608,21 @@ export function MainWindow({
           ) : (
             <div key="category-main" className="animate-menu-slide-right">
               <button
+                role="menuitem"
                 onClick={() => {
                   setCategoryMenuClosing(true);
                   setRenamingCategory(categoryMenu.category);
                   setRenameCategoryValue(categoryMenu.category);
                 }}
-                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bamboo/50"
               >
                 {t("main.category.rename", { defaultValue: "重命名" })}
               </button>
               <button
+                role="menuitem"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => switchCategoryMenuPanel(true)}
-                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-red-400 hover:bg-danger-bg hover:text-red-500 transition-colors cursor-pointer border-t border-paper-deep/20 outline-none"
+                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-red-400 hover:bg-danger-bg hover:text-red-500 transition-colors cursor-pointer border-t border-paper-deep/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bamboo/50"
               >
                 {t("main.category.delete", { defaultValue: "删除分类" })}
               </button>

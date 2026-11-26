@@ -14,6 +14,7 @@ import { FONT_ZOOM_MAX, FONT_ZOOM_MIN } from "../features/settings/fontZoom";
 import {
   formatHeldKeys,
   hotkeyToConfigString,
+  isShortcutRecordingEscape,
   isValidGlobalShortcut,
   shortcutPlatform,
 } from "../features/settings/shortcutRecorder";
@@ -24,6 +25,19 @@ import { LOCALE_OPTIONS } from "../locales/locale-whitelist";
 import { SlidingButtonGroup } from "./SlidingButtonGroup";
 
 const HARMONY_FONT_LICENSE_URL = new URL("../assets/fonts/LICENSE_Fonts", import.meta.url).href;
+
+// 键盘焦点环：面板里的开关、按钮、输入框统一用这一组
+const FOCUS_RING = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bamboo/50";
+// 滑块自身只有轨道那几像素高，焦点环改画在它所在的整行上
+const RANGE_FOCUS_RING = "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-bamboo/50";
+
+const FIRST_FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
 
 interface SettingsPanelProps {
   config: AppConfig;
@@ -104,16 +118,39 @@ export function SettingsPanel({ config, onChange, onMigrateDataDir, onClose }: S
     [t],
   );
 
+  const panelRef = useRef<HTMLElement>(null);
+
+  // 面板打开后把焦点移进来（首个可聚焦元素，即标题栏的关闭按钮），之后即可纯键盘操作
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      panelRef.current?.querySelector<HTMLElement>(FIRST_FOCUSABLE_SELECTOR)?.focus({
+        preventScroll: true,
+      });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handlePanelKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (e.key !== "Escape" || e.nativeEvent.isComposing) return;
+    // 正在录制快捷键时，Esc 是「取消录制」，留给 useShortcutRecorder，不能顺手关掉设置面板
+    if (isShortcutRecordingEscape(panelRef.current, e.target)) return;
+    onClose();
+  };
+
   return (
-    <aside className="w-[360px] h-full shrink-0 border-l border-paper-deep/30 bg-cloud/92 backdrop-blur-sm flex flex-col">
-      <div className="flex items-center justify-between h-11 px-4 border-b border-paper-deep/25">
+    <aside
+      ref={panelRef}
+      onKeyDown={handlePanelKeyDown}
+      className="w-[360px] h-full shrink-0 border-l border-paper-deep/30 bg-cloud/92 backdrop-blur-sm flex flex-col"
+    >
+      <div className="flex items-center justify-between h-11 px-4 border-b border-paper-deep/25 shrink-0">
         <h2 className="text-[13px] font-display font-medium text-ink-soft">
           {t("settings.title", { defaultValue: "应用设置" })}
         </h2>
         <button
           type="button"
           onClick={onClose}
-          className="w-7 h-7 flex items-center justify-center rounded-lg text-ink-ghost hover:text-ink-soft hover:bg-paper-warm transition-colors cursor-pointer"
+          className={`w-7 h-7 flex items-center justify-center rounded-lg text-ink-ghost hover:text-ink-soft hover:bg-paper-warm transition-colors cursor-pointer ${FOCUS_RING}`}
           title={t("settings.closeTitle", { defaultValue: "关闭设置" })}
         >
           <svg
@@ -155,12 +192,12 @@ export function SettingsPanel({ config, onChange, onMigrateDataDir, onClose }: S
               type="text"
               value={config.dataDir}
               readOnly
-              className="min-w-0 flex-1 h-8 px-2.5 rounded-lg bg-paper-warm/70 border border-paper-deep/40 text-[11px] font-mono text-ink-faint truncate"
+              className={`min-w-0 flex-1 h-8 px-2.5 rounded-lg bg-paper-warm/70 border border-paper-deep/40 text-[11px] font-mono text-ink-faint truncate ${FOCUS_RING}`}
             />
             <button
               type="button"
               onClick={onMigrateDataDir}
-              className="h-8 px-3 rounded-lg border border-paper-deep/45 text-[11px] text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 transition-colors cursor-pointer"
+              className={`h-8 px-3 rounded-lg border border-paper-deep/45 text-[11px] text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 transition-colors cursor-pointer ${FOCUS_RING}`}
             >
               {t("settings.selectFolder", { defaultValue: "选择文件夹" })}
             </button>
@@ -292,7 +329,9 @@ export function SettingsPanel({ config, onChange, onMigrateDataDir, onClose }: S
           <label className="block text-[11px] font-body text-ink-faint">
             {t("settings.fontSize.editor", { defaultValue: "编辑器字号" })}
           </label>
-          <div className="flex items-center gap-3 h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25">
+          <div
+            className={`flex items-center gap-3 h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25 ${RANGE_FOCUS_RING}`}
+          >
             <input
               type="range"
               min={FONT_ZOOM_MIN}
@@ -312,7 +351,9 @@ export function SettingsPanel({ config, onChange, onMigrateDataDir, onClose }: S
           <label className="block text-[11px] font-body text-ink-faint">
             {t("settings.fontSize.surface", { defaultValue: "小窗/磁贴字号" })}
           </label>
-          <div className="flex items-center gap-3 h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25">
+          <div
+            className={`flex items-center gap-3 h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25 ${RANGE_FOCUS_RING}`}
+          >
             <input
               type="range"
               min={FONT_ZOOM_MIN}
@@ -332,7 +373,9 @@ export function SettingsPanel({ config, onChange, onMigrateDataDir, onClose }: S
           <label className="block text-[11px] font-body text-ink-faint">
             {t("settings.tabIndentSize", { defaultValue: "Tab 缩进宽��" })}
           </label>
-          <div className="flex items-center gap-3 h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25">
+          <div
+            className={`flex items-center gap-3 h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25 ${RANGE_FOCUS_RING}`}
+          >
             <input
               type="range"
               min={1}
@@ -363,7 +406,7 @@ export function SettingsPanel({ config, onChange, onMigrateDataDir, onClose }: S
                 type="color"
                 value={normalizeTileColor(config.tileColor)}
                 onChange={(event) => setConfigValue("tileColor", event.target.value)}
-                className="w-10 h-8 rounded-lg border border-paper-deep/40 bg-paper-warm/70 cursor-pointer"
+                className={`w-10 h-8 rounded-lg border border-paper-deep/40 bg-paper-warm/70 cursor-pointer ${FOCUS_RING}`}
               />
               <input
                 type="text"
@@ -371,12 +414,12 @@ export function SettingsPanel({ config, onChange, onMigrateDataDir, onClose }: S
                 onChange={(event) => setConfigValue("tileColor", event.target.value)}
                 placeholder="#f6f3ec"
                 spellCheck={false}
-                className="min-w-0 flex-1 h-8 px-2.5 rounded-lg bg-paper-warm/70 border border-paper-deep/40 text-[12px] font-mono text-ink-soft outline-none"
+                className={`min-w-0 flex-1 h-8 px-2.5 rounded-lg bg-paper-warm/70 border border-paper-deep/40 text-[12px] font-mono text-ink-soft ${FOCUS_RING}`}
               />
               <button
                 type="button"
                 onClick={() => setConfigValue("tileColor", DEFAULT_TILE_COLOR)}
-                className="h-8 px-2.5 rounded-lg border border-paper-deep/45 text-[11px] text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 transition-colors cursor-pointer whitespace-nowrap"
+                className={`h-8 px-2.5 rounded-lg border border-paper-deep/45 text-[11px] text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 transition-colors cursor-pointer whitespace-nowrap ${FOCUS_RING}`}
               >
                 {t("common.default", { defaultValue: "默认" })}
               </button>
@@ -398,7 +441,7 @@ export function SettingsPanel({ config, onChange, onMigrateDataDir, onClose }: S
                 t("settings.background.default", { defaultValue: "默认背景" })
               }
               readOnly
-              className="min-w-0 flex-1 h-8 px-2.5 rounded-lg bg-paper-warm/70 border border-paper-deep/40 text-[11px] font-mono text-ink-faint truncate"
+              className={`min-w-0 flex-1 h-8 px-2.5 rounded-lg bg-paper-warm/70 border border-paper-deep/40 text-[11px] font-mono text-ink-faint truncate ${FOCUS_RING}`}
             />
             <button
               type="button"
@@ -413,7 +456,7 @@ export function SettingsPanel({ config, onChange, onMigrateDataDir, onClose }: S
                   setConfigValue("backgroundImagePath", saved);
                 });
               }}
-              className="h-8 px-3 rounded-lg border border-paper-deep/45 text-[11px] text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 transition-colors cursor-pointer"
+              className={`h-8 px-3 rounded-lg border border-paper-deep/45 text-[11px] text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 transition-colors cursor-pointer ${FOCUS_RING}`}
             >
               {t("settings.background.choose", { defaultValue: "选择" })}
             </button>
@@ -424,7 +467,7 @@ export function SettingsPanel({ config, onChange, onMigrateDataDir, onClose }: S
                   localStorage.removeItem("backgroundImageName");
                   setConfigValue("backgroundImagePath", "");
                 }}
-                className="h-8 px-3 rounded-lg border border-red-400/40 text-[11px] text-red-400 hover:bg-red-400/10 transition-colors cursor-pointer"
+                className={`h-8 px-3 rounded-lg border border-red-400/40 text-[11px] text-red-400 hover:bg-red-400/10 transition-colors cursor-pointer ${FOCUS_RING}`}
               >
                 {t("settings.background.clear", { defaultValue: "清除" })}
               </button>
@@ -518,7 +561,7 @@ export function SettingsPanel({ config, onChange, onMigrateDataDir, onClose }: S
               href={HARMONY_FONT_LICENSE_URL}
               target="_blank"
               rel="noreferrer"
-              className="underline underline-offset-2 hover:text-ink-faint"
+              className={`underline underline-offset-2 hover:text-ink-faint rounded-sm ${FOCUS_RING}`}
             >
               HarmonyOS Sans Fonts License Agreement
             </a>
@@ -536,16 +579,18 @@ interface ToggleRowProps {
 }
 
 function ToggleRow({ label, checked, onChange }: ToggleRowProps) {
+  // 整行就是一个 switch 按钮：原生支持 Tab 聚焦与 Enter / Space 切换，不再借助隐藏的 checkbox
   return (
-    <label className="flex items-center justify-between h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25 cursor-pointer">
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`w-full text-left flex items-center justify-between h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25 cursor-pointer ${FOCUS_RING}`}
+    >
       <span className="text-[12px] text-ink-soft">{label}</span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        className="sr-only"
-      />
       <div
+        aria-hidden="true"
         className={`relative w-8 h-[18px] rounded-full transition-colors duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] ${
           checked ? "bg-bamboo" : "bg-paper-deep/50"
         }`}
@@ -556,7 +601,7 @@ function ToggleRow({ label, checked, onChange }: ToggleRowProps) {
           }`}
         />
       </div>
-    </label>
+    </button>
   );
 }
 
@@ -572,7 +617,9 @@ interface RangeRowProps {
 
 function RangeRow({ label, value, min, max, step, format, onChange }: RangeRowProps) {
   return (
-    <div className="flex items-center gap-3 h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25">
+    <div
+      className={`flex items-center gap-3 h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25 ${RANGE_FOCUS_RING}`}
+    >
       <span className="w-9 text-[11px] text-ink-faint">{label}</span>
       <input
         type="range"
@@ -728,7 +775,7 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
         <button
           type="button"
           onClick={() => recorder.startRecording()}
-          className={`min-w-0 flex-1 h-8 px-2.5 rounded-lg border text-[12px] flex items-center gap-2 cursor-pointer transition-colors ${
+          className={`min-w-0 flex-1 h-8 px-2.5 rounded-lg border text-[12px] flex items-center gap-2 cursor-pointer transition-colors ${FOCUS_RING} ${
             recorder.isRecording
               ? "bg-bamboo-mist/40 border-bamboo"
               : "bg-paper-warm/70 border-paper-deep/40 hover:border-paper-deep/60"
@@ -767,7 +814,7 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
           onClick={clearShortcut}
           aria-label={t("settings.shortcut.clear", { defaultValue: "清除" })}
           title={t("settings.shortcut.clear", { defaultValue: "清除" })}
-          className="w-8 h-8 rounded-lg border border-paper-deep/45 text-[15px] leading-none text-ink-faint hover:text-red-400 hover:bg-paper-warm/70 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          className={`w-8 h-8 rounded-lg border border-paper-deep/45 text-[15px] leading-none text-ink-faint hover:text-red-400 hover:bg-paper-warm/70 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer ${FOCUS_RING}`}
         >
           ×
         </button>
@@ -775,7 +822,7 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
           type="button"
           disabled={!value || isChecking || recorder.isRecording}
           onClick={() => void runShortcutCheck(value, false)}
-          className="h-8 px-3 rounded-lg border border-paper-deep/45 text-[11px] text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          className={`h-8 px-3 rounded-lg border border-paper-deep/45 text-[11px] text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer ${FOCUS_RING}`}
         >
           {isChecking
             ? t("settings.shortcut.checkingShort", { defaultValue: "检测中" })
