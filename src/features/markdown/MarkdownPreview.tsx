@@ -194,7 +194,11 @@ const TaskListContext = createContext<((offset: number, checked: boolean) => voi
   undefined,
 );
 
-const remarkPlugins = [remarkGfm, remarkMath, remarkAlerts];
+// singleTilde: false — only ~~text~~ is strikethrough; a lone ~ stays literal so
+// numeric ranges like "0.2~3 μm" aren't mis-parsed as GFM strikethrough.
+const remarkPlugins = [[remarkGfm, { singleTilde: false }], remarkMath, remarkAlerts] as Parameters<
+  typeof Markdown
+>[0]["remarkPlugins"];
 const sanitizeSchema = {
   ...defaultSchema,
   tagNames: [...(defaultSchema.tagNames ?? []), "mark", "center", "font", "u", "abbr"],
