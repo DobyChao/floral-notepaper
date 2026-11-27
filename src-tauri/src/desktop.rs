@@ -428,6 +428,8 @@ const TRAY_QUIT_ID: &str = "quit";
 #[cfg(target_os = "macos")]
 static FULLSCREEN_HIDING: AtomicBool = AtomicBool::new(false);
 const NOTEPAD_POOL_CAPACITY: usize = 2;
+/// 一次补充完成后池仍未满时，续排下一次补充的延迟
+const NOTEPAD_REPLENISH_FOLLOW_UP_DELAY_MS: u64 = 400;
 
 /// Stores the file path passed as a command-line argument on cold start.
 /// The frontend retrieves and clears this value after initialization via
@@ -568,6 +570,8 @@ enum ShortcutAction {
 #[derive(Default)]
 struct NotepadPool {
     available: Mutex<Vec<String>>,
+    /// 是否有补充在途；同一时刻只允许一个补充（单飞）
+    replenish_pending: AtomicBool,
 }
 
 impl NotepadPool {
@@ -590,6 +594,15 @@ impl NotepadPool {
             .lock()
             .map(|a| a.len() < NOTEPAD_POOL_CAPACITY)
             .unwrap_or(false)
+    }
+
+    /// 登记一次补充；已有补充在途时返回 false
+    fn try_begin_replenish(&self) -> bool {
+        !self.replenish_pending.swap(true, Ordering::SeqCst)
+    }
+
+    fn finish_replenish(&self) {
+        self.replenish_pending.store(false, Ordering::SeqCst);
     }
 }
 
@@ -1570,23 +1583,47 @@ fn should_save_surface_size_before_close(label: &str) -> bool {
 }
 
 fn schedule_notepad_prewarm(app: &AppHandle) {
-    for i in 0..NOTEPAD_POOL_CAPACITY {
-        let delay = 800 + i as u64 * 400;
-        schedule_notepad_replenish(app, delay);
-    }
+    schedule_notepad_replenish(app, 800);
 }
 
 fn schedule_notepad_replenish(app: &AppHandle, delay_ms: u64) {
+    let Some(pool) = app.try_state::<NotepadPool>() else {
+        return;
+    };
+    if !pool.is_below_capacity() {
+        return;
+    }
+    // 单飞：已有补充在途时不再排队，避免激活与启动预热并发 build 出多余的隐藏窗口
+    if !pool.try_begin_replenish() {
+        return;
+    }
+
     let handle = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         let handle_inner = handle.clone();
         let _ = handle.run_on_main_thread(move || {
-            if let Err(error) = prewarm_notepad(&handle_inner) {
-                eprintln!("failed to replenish notepad pool: {error}");
-            }
+            let succeeded = match prewarm_notepad(&handle_inner) {
+                Ok(()) => true,
+                Err(error) => {
+                    eprintln!("failed to replenish notepad pool: {error}");
+                    false
+                }
+            };
+            finish_notepad_replenish(&handle_inner, succeeded);
         });
     });
+}
+
+/// 一次补充结束：清除单飞标志，成功时续排下一次（池已满时调度函数会直接返回）。
+/// 启动预热只排一个补充，靠续排逐个填满到容量；失败不续排，避免持续失败时无限重试。
+fn finish_notepad_replenish(app: &AppHandle, succeeded: bool) {
+    if let Some(pool) = app.try_state::<NotepadPool>() {
+        pool.finish_replenish();
+    }
+    if succeeded {
+        schedule_notepad_replenish(app, NOTEPAD_REPLENISH_FOLLOW_UP_DELAY_MS);
+    }
 }
 
 fn prewarm_notepad(app: &AppHandle) -> Result<(), AppError> {
@@ -1623,10 +1660,17 @@ fn prewarm_notepad(app: &AppHandle) -> Result<(), AppError> {
     .focused(false)
     .build()?;
 
+    // build 期间池可能已被回收的窗口填满：入不了池就销毁刚建的窗口，
+    // 否则这个隐藏 WebView 不归属任何地方，会越积越多。
+    // 用 destroy 而不是 close：close 会触发 CloseRequested，把这个从未使用过的
+    // 预热窗口的初始尺寸当成便签尺寸写进配置
+    if !pool.put(label) {
+        let _ = window.destroy();
+        return Ok(());
+    }
+
     // 预热窗口在池中等待期间保持低内存档位，激活时恢复 Normal
     set_webview_memory_usage_level(&window, true);
-
-    pool.put(label);
 
     Ok(())
 }
@@ -2784,6 +2828,62 @@ mod tests {
         assert_eq!(specs.height, 260.0);
         assert_eq!(specs.min_width, 220.0);
         assert_eq!(specs.min_height, 220.0);
+    }
+
+    #[test]
+    fn notepad_pool_rejects_puts_beyond_capacity() {
+        let pool = NotepadPool::default();
+
+        assert!(pool.put("notepad-a".into()));
+        assert!(pool.put("notepad-b".into()));
+        assert!(!pool.put("notepad-c".into()));
+        assert!(!pool.is_below_capacity());
+    }
+
+    #[test]
+    fn notepad_pool_has_spare_slot_after_take() {
+        let pool = NotepadPool::default();
+        pool.put("notepad-a".into());
+        pool.put("notepad-b".into());
+
+        assert_eq!(pool.take(), Some("notepad-b".into()));
+        assert!(pool.is_below_capacity());
+    }
+
+    #[test]
+    fn notepad_pool_replenish_is_single_flight() {
+        let pool = NotepadPool::default();
+
+        assert!(pool.try_begin_replenish());
+        assert!(!pool.try_begin_replenish());
+
+        pool.finish_replenish();
+        assert!(pool.try_begin_replenish());
+    }
+
+    #[test]
+    fn rejects_recycled_notepad_when_pool_is_already_refilled() {
+        let pool = NotepadPool::default();
+        pool.put("notepad-a".into());
+        pool.put("notepad-b".into());
+
+        // 取出 b 后补充已把池填满，此时回收 b 入不了池，调用方据此关闭它
+        assert_eq!(pool.take(), Some("notepad-b".into()));
+        assert!(pool.put("notepad-c".into()));
+        assert!(!pool.put("notepad-b".into()));
+    }
+
+    #[test]
+    fn rejects_prewarmed_notepad_when_pool_fills_during_build() {
+        let pool = NotepadPool::default();
+        pool.put("notepad-a".into());
+        pool.put("notepad-b".into());
+
+        // build 前池有空位，build 期间 Esc 回收了取出的窗口，build 后入池失败
+        assert_eq!(pool.take(), Some("notepad-b".into()));
+        assert!(pool.is_below_capacity());
+        assert!(pool.put("notepad-b".into()));
+        assert!(!pool.put("notepad-d".into()));
     }
 
     #[test]
