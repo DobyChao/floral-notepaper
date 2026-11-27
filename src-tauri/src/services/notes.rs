@@ -33,6 +33,9 @@ pub struct AppConfig {
     pub global_shortcut: String,
     pub close_to_tray: bool,
     pub autostart: bool,
+    // 开机自动恢复的磁贴笔记 id 列表
+    #[serde(default)]
+    pub autostart_tiles: Vec<String>,
     pub default_view_mode: String,
     #[serde(default = "default_note_auto_save")]
     pub note_auto_save: bool,
@@ -1145,6 +1148,7 @@ impl NoteStore {
             global_shortcut: "Ctrl+Space".into(),
             close_to_tray: true,
             autostart: false,
+            autostart_tiles: Vec::new(),
             default_view_mode: "split".into(),
             note_auto_save: true,
             note_surface_auto_save: true,
@@ -1925,6 +1929,7 @@ mod tests {
             global_shortcut: "Alt+Space".into(),
             close_to_tray: false,
             autostart: true,
+            autostart_tiles: Vec::new(),
             default_view_mode: "preview".into(),
             note_auto_save: false,
             note_surface_auto_save: false,
@@ -1999,6 +2004,38 @@ mod tests {
             .expect("save config with esc close off");
         let reloaded = store.load_config().expect("reload config");
         assert!(!reloaded.notepad_esc_close);
+    }
+
+    #[test]
+    fn autostart_tiles_default_to_empty_when_config_lacks_field() {
+        let store = test_store("autostart-tiles-default");
+        fs::create_dir_all(store.config_dir.as_path()).expect("create config dir");
+
+        // 旧版本 config.json 没有 autostartTiles 字段，读入时应为空列表
+        let legacy = serde_json::json!({
+            "globalShortcut": "Ctrl+Space",
+            "closeToTray": true,
+            "autostart": false,
+            "defaultViewMode": "split"
+        });
+        fs::write(
+            store.config_path(),
+            serde_json::to_string_pretty(&legacy).expect("serialize legacy config"),
+        )
+        .expect("write legacy config");
+
+        let loaded = store.load_config().expect("load legacy config");
+        assert!(loaded.autostart_tiles.is_empty());
+
+        // 回写后的 config 补上该字段，再次读入保持不变
+        store
+            .save_config(AppConfig {
+                autostart_tiles: vec!["note-1".into()],
+                ..loaded
+            })
+            .expect("save config with autostart tile");
+        let reloaded = store.load_config().expect("reload config");
+        assert_eq!(reloaded.autostart_tiles, vec!["note-1".to_string()]);
     }
 
     #[test]

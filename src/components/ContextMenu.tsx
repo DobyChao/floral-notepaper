@@ -5,8 +5,14 @@ import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { EditorView } from "@codemirror/view";
 import { getConfig } from "../features/settings/api";
 import type { AppConfig } from "../features/settings/types";
-import { requestSurfaceAction } from "../features/windows/surfaceActions";
+import { requestSurfaceAction, type NoteSurfaceAction } from "../features/windows/surfaceActions";
 import { getTileContextMenuItems } from "../features/windows/tileContextMenu";
+import { getCurrentTileAutostart, subscribeTileAutostart } from "../features/windows/tileAutostart";
+import {
+  getCurrentWindowLayer,
+  subscribeWindowLayer,
+  type WindowLayer,
+} from "../features/windows/windowLayer";
 import { focusFirstMenuItem, handleMenuKeyDown } from "./menuKeyboard";
 import { POPUP_VIEWPORT_MARGIN, useViewportPopupPosition } from "./popupPosition";
 
@@ -84,7 +90,20 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
     null,
   );
   const tileCtrlCloseRef = useRef(true);
-  const tileContextMenuItems = useMemo(() => getTileContextMenuItems(t), [t]);
+  const [tileLayer, setTileLayer] = useState<WindowLayer>(getCurrentWindowLayer());
+  const [tileAutostart, setTileAutostart] = useState(getCurrentTileAutostart());
+  const tileContextMenuItems = useMemo(
+    () => getTileContextMenuItems(t, tileLayer, tileAutostart),
+    [t, tileLayer, tileAutostart],
+  );
+
+  useEffect(() => {
+    return subscribeWindowLayer(setTileLayer);
+  }, []);
+
+  useEffect(() => {
+    return subscribeTileAutostart(setTileAutostart);
+  }, []);
 
   useEffect(() => {
     getConfig()
@@ -251,7 +270,7 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
     dismissMenu();
   };
 
-  const runSurfaceAction = (action: (typeof tileContextMenuItems)[number]["action"]) => {
+  const runSurfaceAction = (action: NoteSurfaceAction) => {
     requestSurfaceAction(action);
     dismissMenu();
   };
@@ -260,12 +279,16 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
     () =>
       menu
         ? menu.type === "tile"
-          ? tileContextMenuItems.map((item) => ({
-              ...item,
-              shortcut: "",
-              action: () => runSurfaceAction(item.action),
-              disabled: false,
-            }))
+          ? tileContextMenuItems.map((item) =>
+              "separator" in item
+                ? { separator: true as const }
+                : {
+                    ...item,
+                    shortcut: "",
+                    action: () => runSurfaceAction(item.action),
+                    disabled: false,
+                  },
+            )
           : [
               {
                 label: t("contextMenu.edit.cut", { defaultValue: "剪切" }),
@@ -321,7 +344,9 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
             ) : (
               <button
                 key={item.label}
-                role="menuitem"
+                // 可勾选项（磁贴的窗口层级 / 开机自启）按复选菜单项暴露状态；其余仍是普通菜单项
+                role={"checked" in item ? "menuitemcheckbox" : "menuitem"}
+                aria-checked={"checked" in item ? item.checked : undefined}
                 onClick={() => void item.action()}
                 disabled={item.disabled}
                 className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] font-body transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bamboo/50 disabled:text-ink-ghost/40 disabled:cursor-default disabled:hover:bg-transparent ${
@@ -330,7 +355,25 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
                     : "text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo"
                 }`}
               >
-                <span>{item.label}</span>
+                <span className="flex items-center gap-1">
+                  {"checked" in item && item.checked && (
+                    <svg
+                      aria-hidden="true"
+                      className="shrink-0"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                  )}
+                  {item.label}
+                </span>
                 {item.shortcut && (
                   <span className="text-[10px] text-ink-ghost/60 font-mono ml-6">
                     {item.shortcut}
