@@ -51,13 +51,23 @@ export function normalizeViewMode(value: string): ViewMode {
   return "split";
 }
 
-// AppConfig 的字段都是原始值，逐字段比较即精确比较。
+// AppConfig 的字段都是原始值，逐字段比较即精确比较；autostartTiles 是字符串数组，
+// 每次事件都是新实例，按内容比较。
 // 用于跳过本窗口自己 emit 的 config-changed 回声，避免内容未变却重渲染
 export function isSameConfig(current: AppConfig | null, next: AppConfig): boolean {
   if (!current) return false;
   const keys = new Set([...Object.keys(current), ...Object.keys(next)]);
   for (const key of keys) {
-    if (!Object.is(current[key as keyof AppConfig], next[key as keyof AppConfig])) return false;
+    if (!isSameValue(current[key as keyof AppConfig], next[key as keyof AppConfig])) return false;
   }
   return true;
+}
+
+function isSameValue(current: unknown, next: unknown): boolean {
+  if (Array.isArray(current) && Array.isArray(next)) {
+    return (
+      current.length === next.length && current.every((item, index) => Object.is(item, next[index]))
+    );
+  }
+  return Object.is(current, next);
 }

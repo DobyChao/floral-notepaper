@@ -138,6 +138,17 @@ describe("settings api", () => {
     expect(isSameConfig(null, config)).toBe(false);
   });
 
+  test("compares the autostart tile list by content, since each event carries a new array", () => {
+    const config = { locale: "zh-CN", autostartTiles: ["note-1"] } as AppConfig;
+
+    // 本窗口保存设置的回声：数组内容相同但不是同一个实例
+    expect(isSameConfig(config, { ...config, autostartTiles: ["note-1"] })).toBe(true);
+    expect(isSameConfig(config, { ...config, autostartTiles: [] })).toBe(false);
+    // 磁贴右键菜单切换开机自启后广播的配置
+    expect(isSameConfig(config, { ...config, autostartTiles: ["note-1", "note-2"] })).toBe(false);
+    expect(isSameConfig(config, { ...config, autostartTiles: ["note-2", "note-1"] })).toBe(false);
+  });
+
   test("chooses a data directory through the folder picker", async () => {
     mockedOpen.mockResolvedValue("D:\\notes");
 

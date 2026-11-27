@@ -6,6 +6,9 @@ import { EditorState, StateField, Transaction } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ContextMenuProvider } from "./ContextMenu";
+import { requestSurfaceAction } from "../features/windows/surfaceActions";
+import { setCurrentTileAutostart } from "../features/windows/tileAutostart";
+import { setCurrentWindowLayer } from "../features/windows/windowLayer";
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
@@ -249,6 +252,122 @@ describe("context menu keyboard support", () => {
       expect(button.className).toContain("focus-visible:ring-inset");
       expect(button.className).toContain("focus-visible:ring-bamboo/50");
     }
+  });
+});
+
+describe("tile context menu", () => {
+  // 复制 / 保存 / 转为小窗 │ 置顶 / 默认层级 / 沉底 / 开机自启 │ 取消钉屏
+  const TILE_ITEM_LABELS = [
+    "复制",
+    "保存",
+    "转为小窗",
+    "置顶",
+    "默认层级",
+    "沉底",
+    "开机自启",
+    "取消钉屏",
+  ];
+  let tile: HTMLDivElement;
+
+  const tileMenu = () => openMenuOn(tile);
+  /** 每个菜单项的勾选状态；不可勾选的项没有 aria-checked */
+  const checkedStates = () => menuItems().map((button) => button.getAttribute("aria-checked"));
+
+  beforeEach(() => {
+    // 窗口层级 / 开机自启是模块级共享状态，每个用例显式复位
+    act(() => {
+      setCurrentWindowLayer("top");
+      setCurrentTileAutostart(false);
+    });
+    vi.mocked(requestSurfaceAction).mockClear();
+    tile = document.createElement("div");
+    tile.dataset.contextMenu = "tile";
+    tile.textContent = "pinned note";
+    container.append(tile);
+  });
+
+  test("focuses its first item and reaches every item with ↑/↓ across separators", async () => {
+    await tileMenu();
+
+    expect(menuItems().map((button) => button.querySelector("span")?.textContent)).toEqual(
+      TILE_ITEM_LABELS,
+    );
+    expect(focusedItem()).toBe("复制");
+
+    for (const label of TILE_ITEM_LABELS.slice(1)) {
+      press("ArrowDown");
+      expect(focusedItem()).toBe(label);
+    }
+    press("ArrowDown");
+    expect(focusedItem()).toBe("取消钉屏");
+
+    for (const label of TILE_ITEM_LABELS.slice(0, -1).reverse()) {
+      press("ArrowUp");
+      expect(focusedItem()).toBe(label);
+    }
+  });
+
+  test("exposes layer and autostart items as checkable and marks the current ones", async () => {
+    await tileMenu();
+
+    expect(menuItems().map((button) => button.getAttribute("role"))).toEqual([
+      "menuitem",
+      "menuitem",
+      "menuitem",
+      "menuitemcheckbox",
+      "menuitemcheckbox",
+      "menuitemcheckbox",
+      "menuitemcheckbox",
+      "menuitem",
+    ]);
+    // 默认层级为置顶、未开启开机自启
+    expect(checkedStates()).toEqual([null, null, null, "true", "false", "false", "false", null]);
+  });
+
+  test("updates the check marks when the layer or autostart state changes", async () => {
+    await tileMenu();
+
+    act(() => {
+      setCurrentWindowLayer("bottom");
+      setCurrentTileAutostart(true);
+    });
+
+    expect(checkedStates()).toEqual([null, null, null, "false", "false", "true", "true", null]);
+  });
+
+  test("runs the matching surface action for the layer and autostart items", async () => {
+    await tileMenu();
+    act(() => menuItems()[3].click()); // 置顶
+    await act(async () => {});
+
+    expect(requestSurfaceAction).toHaveBeenLastCalledWith("layerTop");
+    await finishClosing();
+    expect(menu()).toBeNull();
+
+    await tileMenu();
+    act(() => menuItems()[5].click()); // 沉底
+    expect(requestSurfaceAction).toHaveBeenLastCalledWith("layerBottom");
+
+    await finishClosing();
+    await tileMenu();
+    act(() => menuItems()[6].click()); // 开机自启
+    expect(requestSurfaceAction).toHaveBeenLastCalledWith("autostart");
+    await finishClosing();
+    expect(menu()).toBeNull();
+  });
+
+  test("Esc closes the tile menu without running an item", async () => {
+    await tileMenu();
+    press("ArrowDown");
+    press("ArrowDown");
+    press("ArrowDown");
+    expect(focusedItem()).toBe("置顶");
+
+    press("Escape");
+
+    expect(requestSurfaceAction).not.toHaveBeenCalled();
+    await finishClosing();
+    expect(menu()).toBeNull();
   });
 });
 
